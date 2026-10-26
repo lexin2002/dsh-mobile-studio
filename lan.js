@@ -279,7 +279,10 @@ export function startLanGateway({
       turnId: ev.id,
       kind: ev.kind || 'done',
       sessionId: ev.sessionId,
-      title: title === undefined ? null : title,
+      // 标题可能还没有（新会话第一轮）：发空串而不是 null。
+      // 手机侧 org.json 的 optString 会把 JSON null 读成字符串 "null"，
+      // 通知就变成「null 完成了」。
+      title: title == null ? '' : String(title),
       detail: ev.detail || '',
       at: ev.at,
     };

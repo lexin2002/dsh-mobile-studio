@@ -166,6 +166,9 @@ has('网关：时钟偏差按最近 2 分钟补发', lan, 'skew < -120000');
 has('网关：推送连接落诊断', lan, "'push-connect'");
 has('网关：推送断开落诊断', lan, "'push-close'");
 has('网关：诊断只记元数据不记内容', lan, 'diagRec({');
+// 0.1.0：标题是 JSON null 时，org.json 的 optString 读成字符串 "null" → 通知写「null 完成了」
+has('网关：标题不发 null', lan, "title: title == null ? '' : String(title),");
+has('push：标题 null 归一为空串', push, '"null".equals(title)');
 
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILED`);
 process.exitCode = fail === 0 ? 0 : 1;

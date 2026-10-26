@@ -120,7 +120,7 @@ fire({ id: 'tool:c1', kind: 'clear', sessionId: 's1', at: 1750000000125 });
 frame = await readFrame();
 eq('clear.kind', frame && frame.kind, 'clear');
 eq('clear.id', frame && frame.id, 'tool:c1');
-eq('clear.title 为空', frame && frame.title, null);
+eq('clear.title 为空串（不发 JSON null，手机端 optString 会读成 "null"）', frame && frame.title, '');
 
 // 4) 断线补发（0.9.14）：带上 since，把错过的帧补回来；更早的帧不补
 recent.push({ id: 's1:1750000000200', kind: 'done', sessionId: 's1', at: 1750000000200, detail: '' });

@@ -59,7 +59,7 @@
 
   // 版本标记：每次改完这里同步更新。真机出问题先对这个号，
   // 免得拿着旧包的现象查新代码（之前已经吃过这个亏）。
-  window.__msVersion = '2026-10-26/r13';
+  window.__msVersion = '2026-10-27/r14';
 
   // ---- document 级点击分发 ----
   //
@@ -2667,6 +2667,18 @@
       } catch {
         /* noop */
       }
+      // 落一条诊断：右栏里开网页时返回键"没反应"，需要知道它到底被哪层吃掉、
+      // 页面上有没有 iframe（网页面板几乎都是 iframe 渲染的）。
+      try {
+        reportDiag('back', {
+          layer: n,
+          hit: String(window.__msBackHit || '').slice(0, 50),
+          ifr: [...document.querySelectorAll('iframe')].filter((el) => inView(el)).length,
+          act: (document.activeElement && document.activeElement.tagName) || '',
+        });
+      } catch {
+        /* noop */
+      }
       return true;
     };
     const esc = () => {
@@ -2777,6 +2789,38 @@
       if (rbClose) {
         rbClose.click();
         return hit(5);
+      }
+
+      // 5c. 右栏/浮层里打开的是**网页**（iframe）：让网页自己回退一步。
+      //     用户 2026-10-27：「右栏中打开的是网页的话 返回键失效」。
+      //     这种网页面板没有「收起右侧边栏」那种按钮，第 5/5b 层都找不到东西点，
+      //     第 6 层又因为会话输入卡还在 DOM 里而拦不住 → 什么都不发生。
+      //     跨域 iframe 读不到 history，读不到就跳过，交给后面/原生。
+      const webFrame = [...document.querySelectorAll('iframe')]
+        .filter((el) => inView(el))
+        .find((el) => {
+          const r = el.getBoundingClientRect();
+          return r.width > 200 && r.height > 200;
+        });
+      if (webFrame) {
+        let moved = false;
+        try {
+          const w = webFrame.contentWindow;
+          if (w && w.history && w.history.length > 1) {
+            w.history.back();
+            moved = true;
+          }
+        } catch {
+          /* 跨域：读不到就跳过 */
+        }
+        if (moved) {
+          try {
+            window.__msBackHit = 'webframe-back';
+          } catch {
+            /* noop */
+          }
+          return hit(7);
+        }
       }
 
       // 6. 面板页 / 全屏外来浮层 → 回最近一次会话。

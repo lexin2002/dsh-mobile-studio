@@ -497,6 +497,10 @@ public class PushService extends Service {
             String sessionId = o.optString("sessionId", "");
             String title = o.optString("title", "");
             String detail = o.optString("detail", "");
+            // org.json 的坑：字段是 JSON null 时 optString 返回字符串 "null"，
+            // 于是通知文案变成「null 完成了」（用户 2026-10-27 截到的那条）。
+            if (title == null || "null".equals(title) || "undefined".equals(title)) title = "";
+            if (detail == null || "null".equals(detail) || "undefined".equals(detail)) detail = "";
             String id = o.optString("id", "");
             if (id.isEmpty()) id = o.optString("turnId", "");
             if (id.isEmpty()) id = sessionId + ":" + o.optLong("at", 0);
