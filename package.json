@@ -1,0 +1,58 @@
+{
+  "name": "dsh-mobile-studio",
+  "version": "0.1.0",
+  "description": "DSH 移动端工作台：局域网网关把桌面板 DSH 给手机用（/m 手机页、扫码登录、任务推送），外加手机形态 UI 与安卓壳 App。",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "lan.js",
+    "push-events.js",
+    "mobile-filter.js",
+    "auth.js",
+    "client.js",
+    "qr-inline.js",
+    "cordis.patch.yml",
+    "mobile/",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
+    }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lexin2002/dsh-mobile-studio.git"
+  },
+  "homepage": "https://github.com/lexin2002/dsh-mobile-studio#readme",
+  "bugs": {
+    "url": "https://github.com/lexin2002/dsh-mobile-studio/issues"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "cordis-plugin",
+    "mobile",
+    "android",
+    "lan-gateway"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  }
+}

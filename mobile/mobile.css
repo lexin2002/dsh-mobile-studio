@@ -1,0 +1,1422 @@
+/*
+ * 手机端样式。
+ *
+ * 全部规则挂在 html[data-ms-mobile] 下，桌面端永远不匹配。
+ *
+ * 原则（每一条都是踩坑换来的）：
+ *   1. 不锁 html/body/#root 的高度 —— 官方 height:100% 链自己是对的，
+ *      锁 --ms-vvh 会因浏览器工具栏抖动把输入框压没（实测事故）
+ *   2. 不自造顶部按钮 —— 折叠侧栏顶部的官方开关就是抽屉开关，
+ *      自造按钮会和它叠在同一位置（实测"左上角错位"）
+ *   3. 折叠侧栏不能 visibility:hidden —— 官方开关就在它里面，
+ *      藏了容器 = 藏了开关（实测"左栏按钮没了"）
+ *   4. grid 必须保留三列 [sidebar][center][rightbar]，
+ *      写两列会把右栏挤成 0 宽（实测"右侧边栏报废"）
+ *   5. 改 index.js / lan.js 要重启 DSH；改本文件和 mobile.js 只需刷新页面
+ */
+
+html[data-ms-mobile] {
+  --ms-safe-top: env(safe-area-inset-top, 0px);
+  --ms-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --ms-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  overscroll-behavior-y: none;
+}
+
+html[data-ms-mobile] body {
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+/* ---- 网格：三列都要在，只把侧栏那列收窄 ---- */
+
+html[data-ms-mobile] div:has(> div > [data-slot='sidebar']) {
+  grid-template-columns: 0 minmax(0, 1fr) auto !important;
+  grid-template-areas: none !important;
+}
+
+/*
+ * 三个主要格子显式钉在各自轨道上。
+ * 原因：侧栏一旦脱离文档流（position: fixed），就不再占网格格子，
+ * 后面两个自动排位会各自左移一格 —— 结果是中间内容落进 0 宽的第一列，
+ * 整页看起来就是白屏（实测 centerW=0）。钉住列号后不受影响。
+ */
+html[data-ms-mobile] div:has(> div > [data-slot='sidebar']) > div:has(> [data-slot='sidebar']) {
+  grid-column: 1;
+}
+
+html[data-ms-mobile] div:has(> div > [data-slot='sidebar']) > div:has(> [data-slot='main']) {
+  grid-column: 2;
+}
+
+html[data-ms-mobile] div:has(> div > [data-slot='sidebar']) > div:has(> [data-slot='rightbar']) {
+  grid-column: 3;
+}
+
+/* 侧栏两种状态都脱离文档流（fixed），宽度保持内容宽（约 281px），
+ * 收起时不改宽度、只用 transform 移到屏幕外 —— 这样才有滑动动画，
+ * 也不会出现「宽度一帧内从 281 变 1px → 白闪一下」。 */
+html[data-ms-mobile] div:has(> [data-slot='sidebar']) {
+  position: fixed !important;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: auto !important;
+  z-index: 950;
+  box-sizing: border-box;
+  width: auto !important;
+  /* 固定一个下限：官方收起后会渲染成 57px 的窄轨，如果跟着缩，
+     收起动画就变成"缩一下"，不是"滑出去"。锁 280 宽（= 展开时的内容宽），
+     收起时整块平移 280，才是真正的滑出。 */
+  min-width: min(86vw, 280px) !important;
+  max-width: min(86vw, 340px) !important;
+  padding-top: var(--ms-safe-top);
+  padding-bottom: var(--ms-safe-bottom);
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  border-right: 1px solid var(--dsw-alias-border-l1, rgb(0 0 0 / 8%));
+  overflow: hidden;
+  visibility: visible;
+  transform: translate3d(-100%, 0, 0);
+  transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 收起态：内容裁掉（面板整体已经在屏幕外，裁掉是为了保险） */
+html[data-ms-mobile][data-ms-drawer='closed'] div:has(> [data-slot='sidebar']) {
+  overflow: hidden !important;
+}
+
+/* 左上角开关：面板滑走时官方那个跟着走了，这里留一个在原位。
+   展开后淡出（抽屉里官方开关接管）。 */
+html[data-ms-mobile] .ms-toggle {
+  position: fixed;
+  /* 7px 而不是首栏的 10px：这颗键 36px 高，邻居（标题/状态图标）都是 28px、
+     从 y=11 起，中心在 25。按 10px 放的话它中心在 28，比谁都低 3px ——
+     真机看就是"左栏按钮往下掉了一点"。7+18 = 25，和标题同一中线。 */
+  top: calc(var(--ms-safe-top) + 7px);
+  left: 8px;
+  z-index: 960;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-2, #fff);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 12%);
+  /* 官方本版已不再定义 --dsw-alias-text-primary（实测元素级取值为空），继续用它等于永远吃硬编码回退色：浅色下看不出来，暗色下自建按钮的图标就是黑的。改成实际存在的文字色 token，并保留旧名做第二级回退。 */
+  color: var(--dsw-alias-label-primary, var(--dsw-alias-text-primary, #1b1b1d));
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 0.18s ease;
+}
+
+html[data-ms-mobile] .ms-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+
+html[data-ms-mobile][data-ms-drawer='open'] .ms-toggle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 右栏开着时藏汉堡：右栏全屏盖住会话左上角 fixed 的汉堡会压住右栏首栏
+   第一个标签（≡ 盖"上下文 / 开始"）。抽屉不受影响：左缘右滑照样开。 */
+html[data-ms-mobile][data-ms-rb='1'] .ms-toggle {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* 标题行的左边距统一在下面「会话首栏」那一节给（margin-left:32）。
+ * 历史：这里曾经用 `[class*='titleRow']` 通配着推 32px，误伤了所有带
+ * titleRow 的组件（每张插件卡片的标题都被多推 32px），已收窄到
+ * header[class*='Dc7zOa_header'] 下面那一处。 */
+
+/* ---- 抽屉展开：浮层盖在内容上 ----
+ * 注意：不要用 :has([class*='root']...) 做兜底——侧栏里有十几个
+ * 名字带 root 的元素（面板、列表都是 *root），:has 会永远命中，
+ * 导致抽屉关不上（实测 drawer=closed 但宽 335px）。
+ * 开关状态只认 JS 写的 data-ms-drawer，JS 侧已做三重同步保障。 */
+
+html[data-ms-mobile][data-ms-drawer='open'] div:has(> [data-slot='sidebar']) {
+  transform: translate3d(0, 0, 0);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overflow-x: hidden;
+}
+
+html[data-ms-mobile][data-ms-drawer='open'] div:has(> [data-slot='sidebar']) button[data-ms-c~='toggle'] {
+  position: static;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  box-shadow: none;
+}
+
+/* ---- 主内容与右栏 ---- */
+
+html[data-ms-mobile] div:has(> [data-slot='main']) {
+  min-width: 0;
+  width: 100%;
+}
+
+/* 右栏保持官方的展开/收起逻辑，只限制最大宽度 */
+html[data-ms-mobile] div:has(> [data-slot='rightbar']) {
+  max-width: 100vw;
+}
+
+/* ---- 遮罩 ---- */
+
+html[data-ms-mobile] .ms-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 940;
+  background: rgb(0 0 0 / 32%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.26s var(--ms-ease);
+}
+
+html[data-ms-mobile][data-ms-drawer='open'] .ms-scrim {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* ---- 触摸 ---- */
+
+html[data-ms-mobile] button,
+html[data-ms-mobile] [role='button'] {
+  touch-action: manipulation;
+}
+
+/*
+ * iOS Safari 在 input / textarea 字号 < 16px 时，聚焦会自动缩放页面，
+ * 缩放后布局全乱且不会自动恢复 —— 真机上"一打字界面就乱"的常见根因。
+ * 强制提到 16px，只影响手机端。
+ */
+html[data-ms-mobile] textarea,
+html[data-ms-mobile] input[type='text'],
+html[data-ms-mobile] input[type='search'],
+html[data-ms-mobile] [contenteditable='true'] {
+  /* iOS 上小于 16px 的输入框会在聚焦时自动放大整页，且官方可能用 inline 字号，
+     所以这里必须 !important；桌面测不出来，属于“保命型”覆盖。 */
+  font-size: 16px !important;
+}
+
+/* ---- 键盘：只补安全区，不锁高度 ---- */
+
+/*
+ * 输入法遮挡的最终方案：不锁 html/body 高度（会压没输入框），
+ * 只在键盘真正弹起、且 --ms-vvh 与布局视口出现大差值时，
+ * 把底部安全区换成键盘高度，让官方自己的滚动区把输入框顶上来。
+ * --ms-kb-inset 由 mobile.js 写入，桌面端恒为 0。
+ */
+html[data-ms-mobile][data-ms-kb='1'] [data-ms-c~='bottomRow'],
+html[data-ms-mobile][data-ms-kb='1'] body {
+  padding-bottom: var(--ms-kb-inset);
+}
+
+/* ---- 底部安全区 ---- */
+
+html[data-ms-mobile] [data-ms-c~='bottomRow'] {
+  padding-bottom: var(--ms-safe-bottom);
+}
+
+/* ---- 底部状态条：只显示整理过的两个数 ----
+ *
+ * 官方三颗药丸文字太长（「34 轮 760 步 · 212 tok/s」「212M tok · 缓存命中 99%」），
+ * 390 宽下第一颗被截成「34 轮 760 步 ·…」，tok/s 正好被截掉。
+ * mobile.js 把要显示的部分写进 data-ms-stat，这里替换原文字；
+ * 原文仍留在 aria-label 里，读屏和点开的详情面板不受影响。
+ */
+html[data-ms-mobile] [data-composer-stat] button[data-ms-stat] > span[data-ms-c~='label'] {
+  display: none;
+}
+
+html[data-ms-mobile] [data-composer-stat] button[data-ms-stat]::after {
+  content: attr(data-ms-stat);
+  color: inherit;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 方案 B：外壳高度直接绑「看得见的高度」（`?msvp=1` 试用）----
+ *
+ * 不按键盘高度去补 padding，而是把外壳高度设成 visualViewport.height：
+ * 键盘多高、换哪种输入法、有没有多一行工具栏，全都只是改这一个数，
+ * 不需要我们猜。iOS 那种键盘盖在页面上的行为也覆盖得到。
+ *
+ * 注意：这里只改高度，**不给 frame 加 transform** —— frame 一旦成为
+ * 包含块，抽屉的 position:fixed 会跟着变参考系，之前白屏就是这类改动。
+ */
+html[data-ms-mobile][data-ms-vp='1'] body,
+html[data-ms-mobile][data-ms-vp='1'] div:has(> div > [data-slot='sidebar']) {
+  /* 这两个 !important 是保命的，不是历史包袱：官方给 body/frame 的高度可能来自
+     inline style，不带 !important 盖不住，键盘补偿整条链会断。
+     桌面无头环境测不出键盘，所以只能保留，并在此写清原因。 */
+  height: var(--ms-vv-h, 100vh) !important;
+  min-height: 0 !important;
+}
+
+html[data-ms-mobile][data-ms-vp='1'] body,
+html[data-ms-mobile][data-ms-vp='1'] [data-ms-c~='bottomRow'] {
+  padding-bottom: 0 !important;
+}
+
+/* ---- 减弱动效 ---- */
+
+@media (prefers-reduced-motion: reduce) {
+  html[data-ms-mobile] .ms-scrim,
+  html[data-ms-mobile] .ms-rack {
+    transition: none;
+  }
+}
+
+/* ---- 计划徽章：别让「计划」被挤成竖排 ----
+ *
+ * 官方那颗药丸（dsh-client-ui-plan 的 chip）有 min-width:34px / inline-flex，
+ * 但**没有** white-space:nowrap。窄屏工具条一挤，两个字就折成上下两行、
+ * 底部还被裁掉（用户截图里就是「计」压「划」）。
+ *
+ * 这里钉死单行、不参与收缩；宽度不够时让右边的模型名去省略 —— 它本来就有 ellipsis。
+ * 选择器用 mobile.js 打的 data-ms-plan，不用官方类名（带构建哈希，升级就变）。
+ */
+
+html[data-ms-mobile] button[data-ms-plan] {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/*
+ * 兜底：不靠 JS 打标记，直接用官方那颗药丸自己的 aria-label（中文「退出计划模式」/
+ * 英文 "Exit plan mode"）来选中它。JS 打标记可能晚一拍或找不到，纯 CSS 这条永远在。
+ */
+html[data-ms-mobile] button[aria-label*='计划'],
+html[data-ms-mobile] button[aria-label*='plan' i] {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* 工具条里的按钮一律不换行：宁可挤，也不能把「计划」两个字叠成两行 */
+html[data-ms-mobile] [data-ms-c~='bottomRow'] button {
+  white-space: nowrap;
+}
+
+html[data-ms-mobile] span[data-ms-plan-seat] {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+/* ---- 首栏避让：只动横向、不动纵向（2026-10-22 探针实测重写）----
+ *
+ * 教训：整页 margin-top:52 看着一了百了，真机顶部空 90px，不和谐，已删。
+ * 探针实测数据（browser-harness probe-selfdiag5，无头 Chrome 390x844）：
+ *   面板页标题 x=24，汉堡占 x=8~44。
+ * 所以两边都只右移：面板页头 padding-left:26（标题 24→50，6.2 时代验过的数），
+ * 会话标题整行 margin-left:32（20→52）。纵向一律不动。
+ * 注意 Dc7zOa_ 是构建哈希，官方升级换了哈希的症状就是标题又被压住，
+ * 到时重跑探针取新类名即可（probe-selfdiag5.mjs）。
+ */
+html[data-ms-mobile] [data-ms-c~='pageHead'],
+html[data-ms-mobile] [data-ms-c~='detailTop'] {
+  padding-left: 26px;
+}
+
+/* ---- 会话首栏：汉堡 / 标题 / 状态标签 / 收纳 / 右栏开关 和谐共存 ----
+ *
+ * 官方排布实测（browser-harness probe-container-rules / probe-header-detail）：
+ *   .Dc7zOa_header         grid，grid-template-columns: 0 | 342，padding 10 28 0 20
+ *   .Dc7zOa_titleRow       grid-column 2，padding-inline-start: max(0, var(--dsh-frame-leading-clearance) - 20)
+ *   .Dc7zOa_titleCluster   flex: 1 1 0%，gap 10
+ *     .Dc7zOa_crumbs         flex: 0 1 auto; min-width: 0   ← 会话标题
+ *     .Dc7zOa_headerActions  flex: 0 0 auto（永不收缩）      ← 状态标签，实测 274px
+ *   行尾：headerUtilities（空时 display:none）+ headerCorner（28px）
+ *
+ * 窄屏缺陷（官方这套排布固有的，不是我们写错的）：
+ *   状态标签一出现（"3 个子智能体" 92 + "1 个后台任务" 110），headerActions 不收缩，
+ *   标题是唯一可收缩的那个 → 被压成 0 宽（实测 16px，整条标题看不见）；
+ *   整行还溢出视口：后台任务标签被切、收纳钮落在 x=392..420 完全在屏外点不到。
+ *
+ * 设计（标题优先，标签整条换行，任何一档都不裁字、不出屏）：
+ *   标题   首选 12em（≈168px），保底 4.5em，超出省略号；
+ *   标签区 和标题并排放得下就并排；放不下就**整条**落到第二行（标签之间不换行）。
+ *   于是：没有任务时是一行（和现在一样），有任务跑时才多一行 —— 且那一行全是
+ *   真实状态（子智能体 / 后台任务），不是留白。
+ *   行尾   收纳钮由 JS 插在 headerCorner 前面，永远在屏内。
+ *
+ * 左边距只在这里给一次：32px（汉堡 8..44 + 8 间隙 = 52）。
+ * 官方两条平台专用留白都拆了：Windows 标题栏模式在 JS 里摘掉（那 84px 是
+ * !important，CSS 压不住），darwin 那条 160px 的 --dsh-frame-leading-clearance
+ * 在这里归零（macOS 是给窗口红绿灯让位，手机上没那三个灯）。
+ */
+html[data-ms-mobile] div:has(> div > [data-slot='sidebar']),
+/* 首栏让位走官方变量，不认类名：官方 titleRow 的 padding-inline-start 就是
+ * max(0, var(--dsh-frame-leading-clearance) - 20)，这是框架给左上角系统控件预留的机制，
+ * DSH 升级换哈希也照样生效。汉堡键占 x=8~44，所以给 56（=20+36，标题落在 56，
+ * 离汉堡右缘 12px）。原来是 72 —— 汉堡只到 44，标题却从 72 起，中间空 28px，
+ * 首栏左边明显空一块（真机观感「不和谐」）。 */
+html[data-ms-mobile],
+html[data-ms-mobile] div:has(> div > [data-slot='sidebar']),
+html[data-ms-mobile] div:has(> div > [data-slot='sidebar'])[data-sidebar-collapsed] {
+  --dsh-frame-leading-clearance: 56px;
+}
+
+/* 成员 / 后台任务压尺寸：只收内边距与字号，点击区不小于 28px 高下拉功能原样。
+ * 另加 flex 锁死：工具栏是 flex 行，不锁的话省出来的空间会被 flex-grow 吃回去
+ * （探针实测 105→118px 越压越宽），max-width + 省略号兜底超长文本。
+ * 124px 是换行之后那一行放得下的最大宽度（实测该行 270px：28+6+92+6+124=256），
+ * 刚好够「1 个后台任务…」——比硬切在半个字上好读。省略号必须写在里层 span 上：
+ * 按钮是 flex 行，自己的 text-overflow 管不到里面的文字。 */
+
+
+/* 6.8em ≈ 82px：正好停在「1 个后台任务…」。卡在 span 上而不是整颗按钮上，
+ * 免得图标和 padding 一起被算进去、字数少掉一个。 */
+
+
+/* ---- 面板页 → 会话页：淡出/淡入 ----
+ *
+ * 返回键回会话时那 ~1 秒是 host 重新载入会话（点会话行 → 路由 → 拉数据），
+ * 遮不住；但之前是"卡住 → 硬切"，看着像死机。这里只做一件事：
+ * 按下时内容区 120ms 淡到 35%，输入卡一出现立刻撤标记（160ms 淡回）。
+ * 只用 opacity —— transform/filter 会给 fixed 后代换包含块，
+ * 把输入卡、三格、浮层一起带偏（这条踩过）。
+ */
+html[data-ms-mobile] div:has(> [data-slot='main']) {
+  transition: opacity 0.16s ease;
+}
+
+html[data-ms-mobile][data-ms-leaving='1'] div:has(> [data-slot='main']) {
+  opacity: 0.35;
+  transition: opacity 0.12s ease;
+}
+
+/* 我们自己的收纳钮：28px 幽灵按钮，和邻居统一高 */
+html[data-ms-mobile] .ms-stash-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  /* 官方本版已不再定义 --dsw-alias-text-primary（实测元素级取值为空），继续用它等于永远吃硬编码回退色：浅色下看不出来，暗色下自建按钮的图标就是黑的。改成实际存在的文字色 token，并保留旧名做第二级回退。 */
+  color: var(--dsw-alias-label-primary, var(--dsw-alias-text-primary, #1b1b1d));
+  flex: 0 0 auto;
+}
+
+html[data-ms-mobile] .ms-stash-btn svg {
+  width: 18px;
+  height: 18px;
+}
+
+html[data-ms-mobile] .ms-stash-btn:active {
+  background: rgb(0 0 0 / 6%);
+}
+
+/* 二级小菜单：独立 fixed 白卡，不进 React 树，React 改结构影响不到。
+ * 深色主题跟官方走 token，不写死纯白。 */
+html[data-ms-mobile] .ms-stash {
+  position: fixed;
+  z-index: 1500;
+  display: none;
+  min-width: 168px;
+  padding: 6px;
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  border: 1px solid rgb(0 0 0 / 8%);
+  border-radius: 12px;
+  box-shadow: 0 8px 30px rgb(0 0 0 / 16%);
+}
+
+html[data-ms-mobile][data-ms-stash='1'] .ms-stash {
+  display: block;
+}
+
+html[data-ms-mobile] .ms-stash-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  font-size: 14px;
+  text-align: left;
+}
+
+html[data-ms-mobile] .ms-stash-row:active {
+  background: rgb(0 0 0 / 6%);
+}
+
+html[data-ms-mobile] [data-ms-c~='pageHead'] {
+  flex-wrap: wrap;
+  row-gap: 10px;
+}
+
+/* ---- 设置弹窗：两栏改一栏 ----
+ *
+ * 官方是 row：左边 nav 固定 188px，右边内容列。390 宽下内容只剩 154px，
+ * 里面的「标签 / 控件」两列被压成竖排（截图里「权/限/选/择…」一个字一行）。
+ *
+ * 改成竖排：导航变成一行可横滑的标签，内容占满剩余宽度。
+ * 用 `[role=dialog]:has(> nav)` 定位，不依赖带构建哈希的类名（升级就变）。
+ */
+html[data-ms-mobile] [role='dialog']:has(> nav) {
+  flex-direction: column;
+}
+
+html[data-ms-mobile] [role='dialog']:has(> nav) > nav {
+  width: 100%;
+  flex: 0 0 auto;
+  border-right: 0;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--dsw-alias-border-l1, rgb(0 0 0 / 8%));
+}
+
+/* 导航项排成一行，横向可滑 */
+html[data-ms-mobile] [role='dialog']:has(> nav) > nav [data-ms-c~='navList'] {
+  flex-direction: row;
+  overflow-x: auto;
+  overflow-y: hidden;
+  gap: 6px;
+  padding-bottom: 2px;
+}
+
+html[data-ms-mobile] [role='dialog']:has(> nav) > nav [data-ms-c~='navCell'] {
+  width: auto;
+  flex: 0 0 auto;
+  height: 34px;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+html[data-ms-mobile] [role='dialog']:has(> nav) > div {
+  width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* 对话框里的插件卡片行：固定像素宽是按桌面弹窗算的，手机上改成流式。
+ *
+ * 实测（probe-ocrow2.mjs，390x844）：卡片头写死 260px，里面标题
+ * flex-basis:0 被压成 0 宽 —— 「账号」竖排成上下两个字；药丸 nowrap
+ * 溢出盖住右边的「更新于」；整行还被截掉一块（283px 塞进 260px）。
+ * 修法是结构性的：整行 fluid + 允许换行（放得下就一行，放不下尾部
+ * 自动掉到第二行右对齐），标题锁死不许收缩。挤压只从中间描述让。
+ * 选择器只认 cardHead/cardTrigger/cardTitle 这种稳定后缀，
+ * 不写带构建哈希的前缀（升级就变）。 */
+html[data-ms-mobile] [role='dialog'] [data-ms-c~='cardHead'] {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+html[data-ms-mobile] [role='dialog'] [data-ms-c~='cardTrigger'] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+html[data-ms-mobile] [role='dialog'] [data-ms-c~='cardTitle'] {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+html[data-ms-mobile] [role='dialog'] [data-ms-c~='trailing'] {
+  margin-left: auto;
+}
+
+/* ---- 「+」面板：拍照 / 相册 / 文件 三格抽屉 ----
+ *
+ * 点 + 只出一件事：附件抽屉。官方那张指令菜单整张藏掉（见下方 data-ms-attach），
+ * 不再「指令菜单 + 附件面板」两层叠在输入框上方。
+ * 指令菜单改由输入 `/` 唤出（实测能唤出：目标/计划/反馈/压缩/权限/模型）。
+ *
+ * 位置：抽屉是官方定位容器（overlayAnchor，高 0、贴着输入卡上沿）的子节点，
+ * 跟官方菜单用的是同一条定位配方（absolute + bottom:calc(100% + 4px)）。
+ * 所以它永远贴着输入卡、永远在可视区里 —— 键盘弹起/收起、输入卡长高变矮，
+ * 都跟着官方布局走，不需要任何 JS 算像素。
+ *
+ * 为什么必须这样（真机日志）：键盘压着时布局视口只有 502px，而按「无键盘高度」
+ * 算出来的 top 是 607px —— 面板落在视口外，坐标反查全是 none，手指根本点不到，
+ * 那一下会穿透到下面的消息上。
+ */
+html[data-ms-mobile] .ms-rack {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 4px);
+  z-index: 100;
+  display: none;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  padding: 12px;
+  border-radius: 18px;
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  box-shadow: 0 10px 32px rgb(0 0 0 / 16%), 0 0 0 1px rgb(0 0 0 / 5%);
+}
+
+html[data-ms-mobile][data-ms-rack='1'] .ms-rack {
+  display: grid;
+}
+
+html[data-ms-mobile] .ms-rack-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 96px;
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  background: rgb(128 128 128 / 16%);
+  color: inherit;
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1;
+}
+
+html[data-ms-mobile] .ms-rack-tile:active {
+  background: rgb(128 128 128 / 28%);
+}
+
+html[data-ms-mobile] .ms-rack-tile svg {
+  width: 26px;
+  height: 26px;
+  flex: none;
+}
+
+/* 官方菜单里的「文件」行现在不需要藏：附件三格只在 + 面板里出现，
+ * 而 `/` 唤出的指令菜单里「文件 file」是唯一文件入口，留着。 */
+
+
+/* ============================================================================
+ * 泛用层
+ *
+ * 上面那些 [class*='Dc7zOa_'] 是按**具体组件**写的，所以「增加一个页面 = 做一次 UI」。
+ * 下面这一层换成认**形状**：样式只认 data-ms-role 和语义结构，不看页面名、不看插件名。
+ * 新页面只要用标准形状（按钮 / 列表 / 卡片 / 分段控件 / 开关）就自动继承。
+ *
+ * 分三层，从下往上：
+ *   1. 兜底卫生  —— 对所有内容区生效，防溢出、防压字、保命中区
+ *   2. 角色规格  —— page / pageHead / listRow / segmented / switch
+ *   3. 收纳组    —— 抽屉里那一堆页面入口收成一行（.ms-tools）
+ * ==========================================================================*/
+
+/* ---- 1. 兜底卫生 ---- */
+
+/* 内容区不许横向滚动：宽表格、长 URL、代码块各自在自己的盒子里滚 */
+html[data-ms-mobile] [data-ms-role='page'] {
+  overflow-x: clip;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+html[data-ms-mobile] [data-ms-role='page'] :where(p, li, h1, h2, h3, h4, h5, h6, dt, dd) {
+  overflow-wrap: anywhere;
+}
+
+html[data-ms-mobile] [data-ms-role='page'] :where(img, video, canvas, svg:not([data-ms-c~='icon'])) {
+  max-width: 100%;
+}
+
+html[data-ms-mobile] [data-ms-role='page'] :where(pre, table) {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 兜底：任何我们自己的长文本节点也别把页面撑破 */
+html[data-ms-mobile] [data-ms-role='page'] :where(code, kbd, samp) {
+  overflow-wrap: anywhere;
+}
+
+/* ---- 2. 角色规格 ---- */
+
+/* 页头：返回按钮那一行，统一内边距与最小高度 */
+html[data-ms-mobile] [data-ms-role='pageHead'] {
+  min-height: 44px;
+  align-items: center;
+  row-gap: 8px;
+}
+
+/* 页面标题必须让开左上角那个汉堡键（它占 x=8~44）。
+ * 官方页面各自把标题放在不同的壳里，靠类名一条条对齐是修不完的；
+ * 这里直接给「标题元素」本身上左内边距 —— 谁当标题谁让开。
+ * 已经在官方 pageHead 里的（那条老规则已经给了 26px）不再叠加。 */
+html[data-ms-mobile] [data-ms-role='pageTitle']:not([data-ms-c~='pageHead'] *) {
+  padding-left: 22px;
+}
+
+/* 列表行：统一最小命中高度（手指够得着），文本自动截断 */
+html[data-ms-mobile] [data-ms-role='listRow'] {
+  min-height: 44px;
+}
+
+html[data-ms-mobile] [data-ms-role='listRow'] :where(span, div) {
+  min-width: 0;
+}
+
+/* 分段控件：一排等宽按钮，窄屏可横滑，不换行 */
+html[data-ms-mobile] [data-ms-role='segmented'] {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+
+html[data-ms-mobile] [data-ms-role='segmented']::-webkit-scrollbar {
+  display: none;
+}
+
+html[data-ms-mobile] [data-ms-role='segmented'] > * {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 32px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 开关：命中区不小于 44×28，视觉尺寸由官方自己决定 */
+html[data-ms-mobile] [data-ms-role='switch'] {
+  min-width: 44px;
+  min-height: 28px;
+}
+
+/* ---- 3. 抽屉收纳组 ---- */
+
+/* 官方那一列页面入口整列藏掉（不占位）：功能还在，只是换成下面这行收纳 */
+html[data-ms-mobile] [data-ms-tools-src] {
+  display: none;
+}
+
+html[data-ms-mobile] .ms-tools {
+  margin: 0 0 4px;
+}
+
+/* 收起态：一行 36px，高度与入口数量无关 */
+html[data-ms-mobile] .ms-tools-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 36px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+}
+
+html[data-ms-mobile] .ms-tools-row:active {
+  background: rgb(0 0 0 / 6%);
+}
+
+html[data-ms-mobile] .ms-tools-label {
+  flex: 1 1 auto;
+}
+
+html[data-ms-mobile] .ms-tools-count {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: rgb(128 128 128 / 18%);
+  font-size: 11px;
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+html[data-ms-mobile] .ms-tools-chev {
+  flex: none;
+  width: 14px;
+  height: 14px;
+  opacity: 0.55;
+  transition: rotate 160ms ease;
+}
+
+html[data-ms-mobile][data-ms-tools='1'] .ms-tools-chev {
+  rotate: 180deg;
+}
+
+/* 展开态：两列网格，超出组内滚动（不会把工作区顶下去） */
+html[data-ms-mobile] .ms-tools-grid {
+  display: none;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+  padding: 8px 0 4px;
+  max-height: 40vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+html[data-ms-mobile][data-ms-tools='1'] .ms-tools-grid {
+  display: grid;
+}
+
+html[data-ms-mobile] .ms-tools-tile {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 48px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 12px;
+  background: rgb(128 128 128 / 10%);
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+html[data-ms-mobile] .ms-tools-tile:active {
+  background: rgb(128 128 128 / 22%);
+}
+
+html[data-ms-mobile] .ms-tools-ico {
+  display: flex;
+  flex: none;
+  width: 18px;
+  height: 18px;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.75;
+}
+
+html[data-ms-mobile] .ms-tools-ico svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* 第三方面板图标有的靠**祖先选择器**上色（例如官方面板行里的 svg{fill:currentColor}）。
+ * 克隆到我们自己的壳里就丢了那条规则，只剩浏览器默认的黑色 —— 实测「上下文洞察」
+ * 直接变成一个实心黑方块。这里按属性补回来：只给**没写 fill 的** svg 上色，
+ * 写了 fill="none"（描边图标）的一个都不碰。 */
+html[data-ms-mobile] .ms-tools-ico svg:not([fill]) {
+  fill: currentColor;
+}
+
+html[data-ms-mobile] .ms-tools-name {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* ---- task-3 v3：只改UI，不改布局 ----
+ *
+ * 用户纠正：结构上不搬任何官方节点。v2 的 .ms-userrow 同行容器全删，
+ * 用户条官方原样不动（不限宽、不省略、不碰 overflow，账号菜单浮层无影响）。
+ * 只留 UI 层：齿轮保持 absolute 浮在抽屉左下，但换成透明底、无边框、
+ * 无阴影、跟用户条同高同圆角，离右沿 8px，看起来像一家人。
+ * 全部挂在 html[data-ms-mobile] 下，桌面端零残留。
+ */
+html[data-ms-mobile] .ms-gear {
+  position: absolute;
+  right: 8px;
+  bottom: calc(var(--ms-safe-bottom, 0px) + 8px);
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  opacity: 0.72;
+}
+
+html[data-ms-mobile] .ms-gear svg {
+  width: 22px;
+  height: 22px;
+}
+
+html[data-ms-mobile] .ms-gear:active {
+  background: rgb(0 0 0 / 6%);
+  opacity: 1;
+}
+
+/* ---- task-7 UI 余量 ----
+ *
+ * 1. 触区 44：小按钮视觉不动，点击区用 ::after 透明垫撑到 44px
+ *    （拇指友好；iOS 建议 44pt，安卓建议 48dp，取小值 44）。
+ *    .ms-stash-btn 28→44（四边各垫 8），.ms-toggle 36→44（各垫 4，
+ *    它本身 fixed 已是定位元素，不另加 position），.ms-tools-row
+ *    整行宽、只上下各垫 4（36→44 高）。垫子是按钮自身的一部分，
+ *    点到垫子等于点到按钮，不会误触邻居。
+ * 2. 深色：见上面两处 #fff→token（额度面板 / 收纳菜单）。
+ * 3. 320 流式：标签栏 margin-right 170px→min(170px,40vw)。
+ * 4. 药丸 z 层：额度面板 1010→930（抽屉 950 下，页面内容上）。
+ */
+html[data-ms-mobile] .ms-stash-btn {
+  position: relative;
+}
+
+html[data-ms-mobile] .ms-stash-btn::after {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+
+html[data-ms-mobile] .ms-toggle::after {
+  content: '';
+  position: absolute;
+  inset: -4px;
+}
+
+html[data-ms-mobile] .ms-tools-row {
+  position: relative;
+}
+
+html[data-ms-mobile] .ms-tools-row::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -4px;
+  bottom: -4px;
+}
+
+/* 减弱动效补全：之前只管 scrim 和三格抽屉，剩下的过渡（汉堡淡入淡出、
+ * 齿轮、工具组箭头、侧栏滑进滑出）这里一次关掉。 */
+@media (prefers-reduced-motion: reduce) {
+  html[data-ms-mobile] .ms-toggle,
+  html[data-ms-mobile] .ms-gear,
+  html[data-ms-mobile] .ms-tools-chev,
+  html[data-ms-mobile] div:has(> [data-slot='sidebar']) {
+    transition: none;
+  }
+}
+
+/* ==== ms-core-migrated v1（自动迁移，一次 10 条） ==== */
+/*
+ * 手机端样式。
+ *
+ * 全部规则挂在 html[data-ms-mobile] 下，桌面端永远不匹配。
+ *
+ * 原则（每一条都是踩坑换来的）：
+ *   1. 不锁 html/body/#root 的高度 —— 官方 height:100% 链自己是对的，
+ *      锁 --ms-vvh 会因浏览器工具栏抖动把输入框压没（实测事故）
+ *   2. 不自造顶部按钮 —— 折叠侧栏顶部的官方开关就是抽屉开关，
+ *      自造按钮会和它叠在同一位置（实测"左上角错位"）
+ *   3. 折叠侧栏不能 visibility:hidden —— 官方开关就在它里面，
+ *      藏了容器 = 藏了开关（实测"左栏按钮没了"）
+ *   4. grid 必须保留三列 [sidebar][center][rightbar]，
+ *      写两列会把右栏挤成 0 宽（实测"右侧边栏报废"）
+ *   5. 改 index.js / lan.js 要重启 DSH；改本文件和 mobile.js 只需刷新页面
+ */
+
+html[data-ms-mobile]{--ms-safe-top: env(safe-area-inset-top, 0px);
+  --ms-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --ms-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  overscroll-behavior-y: none;}
+/*
+ * 三个主要格子显式钉在各自轨道上。
+ * 原因：侧栏一旦脱离文档流（position: fixed），就不再占网格格子，
+ * 后面两个自动排位会各自左移一格 —— 结果是中间内容落进 0 宽的第一列，
+ * 整页看起来就是白屏（实测 centerW=0）。钉住列号后不受影响。
+ */
+html[data-ms-mobile] div:has(> div > [data-slot='sidebar']) > div:has(> [data-slot='sidebar']){grid-column: 1;}
+html[data-ms-mobile] div:has(> div > [data-slot='sidebar']) > div:has(> [data-slot='main']){grid-column: 2;}
+html[data-ms-mobile] div:has(> div > [data-slot='sidebar']) > div:has(> [data-slot='rightbar']){grid-column: 3;}
+/* 侧栏两种状态都脱离文档流（fixed），宽度保持内容宽（约 281px），
+ * 收起时不改宽度、只用 transform 移到屏幕外 —— 这样才有滑动动画，
+ * 也不会出现「宽度一帧内从 281 变 1px → 白闪一下」。 */
+html[data-ms-mobile] div:has(> [data-slot='sidebar']){position: fixed !important;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  right: auto !important;
+  z-index: 950;
+  box-sizing: border-box;
+  width: auto !important;
+  /* 固定一个下限：官方收起后会渲染成 57px 的窄轨，如果跟着缩，
+     收起动画就变成"缩一下"，不是"滑出去"。锁 280 宽（= 展开时的内容宽），
+     收起时整块平移 280，才是真正的滑出。 */
+  min-width: min(86vw, 280px) !important;
+  max-width: min(86vw, 340px) !important;
+  padding-top: var(--ms-safe-top);
+  padding-bottom: var(--ms-safe-bottom);
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  border-right: 1px solid var(--dsw-alias-border-l1, rgb(0 0 0 / 8%));
+  overflow: hidden;
+  visibility: visible;
+  transform: translate3d(-100%, 0, 0);
+  transition: transform 0.26s cubic-bezier(0.22, 1, 0.36, 1);}
+/* 收起态：内容裁掉（面板整体已经在屏幕外，裁掉是为了保险） */
+html[data-ms-mobile][data-ms-drawer='closed'] div:has(> [data-slot='sidebar']){overflow: hidden !important;}
+/* 标题行的左边距统一在下面「会话首栏」那一节给（margin-left:32）。
+ * 历史：这里曾经用 `[class*='titleRow']` 通配着推 32px，误伤了所有带
+ * titleRow 的组件（每张插件卡片的标题都被多推 32px），已收窄到
+ * header[data-ms-c~="header"] 下面那一处。 */
+
+/* ---- 抽屉展开：浮层盖在内容上 ----
+ * 注意：不要用 :has([class*='root']...) 做兜底——侧栏里有十几个
+ * 名字带 root 的元素（面板、列表都是 *root），:has 会永远命中，
+ * 导致抽屉关不上（实测 drawer=closed 但宽 335px）。
+ * 开关状态只认 JS 写的 data-ms-drawer，JS 侧已做三重同步保障。 */
+
+html[data-ms-mobile][data-ms-drawer='open'] div:has(> [data-slot='sidebar']){transform: translate3d(0, 0, 0);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overflow-x: hidden;}
+html[data-ms-mobile][data-ms-drawer='open'] div:has(> [data-slot='sidebar']) button[data-ms-c~='toggle']{position: static;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  box-shadow: none;}
+/* ---- 主内容与右栏 ---- */
+
+html[data-ms-mobile] div:has(> [data-slot='main']){min-width: 0;
+  width: 100%;}
+/* 右栏保持官方的展开/收起逻辑，只限制最大宽度 */
+html[data-ms-mobile] div:has(> [data-slot='rightbar']){max-width: 100vw;}
+
+/* ===== 迁移块：原构建哈希前缀规则已移除，改为 data-slot / data-ms-c 锚点 ===== */
+/* 迁移版（最小集）：只保留在新 DOM 上仍然需要的规则。
+ *
+ * 判断依据：把旧 30 条逐条注入真实页面比对——旧头部那批是给旧 DOM 写的，
+ * 在新版上反而把「1 个后台任务运行中」挤成三行，已全部丢弃。
+ *
+ * 锚点只用两种：
+ *   1. data-slot（官方座位，构建哈希变了不受影响）
+ *   2. data-ms-c（mobile.js 盖章的本地名，不依赖哈希前缀）
+ */
+
+/* ---- 1. 会话页 tab 行：单行横向滚动，收纳不放「…」菜单 ---- */
+html[data-ms-mobile] [data-ms-c~='tabs'] {
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+html[data-ms-mobile] [data-ms-c~='tabs']::-webkit-scrollbar { display: none; }
+html[data-ms-mobile] [data-ms-c~='tabs'] [data-ms-c~='tab'] {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+/* 用户明确要求：不要「更多会话视图」的「…」收纳 */
+html[data-ms-mobile] [data-ms-c~='viewsMoreAnchor'] { display: none !important; }
+
+/* ---- 2. 输入卡工具条：放不下整组换行，不压字 ---- */
+html[data-ms-mobile] [data-slot='conversation.composer.bar'] [data-ms-c~='row'] {
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+html[data-ms-mobile] [data-slot='conversation.composer.bar'] :is([data-ms-c~='tools'], [data-ms-c~='trailing'], [data-ms-c~='modes']) {
+  flex: 0 0 auto;
+}
+html[data-ms-mobile] [data-slot='conversation.composer.bar'] :is([data-ms-c~='tools'], [data-ms-c~='modes']) {
+  flex-wrap: wrap;
+  max-width: 100%;
+}
+
+/* ---- 3. 输入框限高，长内容不把输入卡顶飞 ---- */
+html[data-ms-mobile] [data-slot='conversation.composer.bar'] [contenteditable='true'] {
+  max-height: 6.4em;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* ---- 4. 附件抽屉打开时：＋ 变 ×，指令菜单让位 ---- */
+html[data-ms-mobile][data-ms-attach='1'] [data-slot='conversation.composer.bar'] [data-ms-c~='menu'] {
+  display: none;
+}
+html[data-ms-mobile] [data-slot='conversation.composer.bar'] [data-ms-c~='menu'] {
+  max-height: 50vh !important;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+html[data-ms-mobile][data-ms-attach='1'] [data-slot='conversation.composer.bar'] [data-ms-c~='add'] {
+  position: relative;
+}
+html[data-ms-mobile][data-ms-attach='1'] [data-slot='conversation.composer.bar'] [data-ms-c~='add'] svg {
+  visibility: hidden;
+}
+html[data-ms-mobile][data-ms-attach='1'] [data-slot='conversation.composer.bar'] [data-ms-c~='add']::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  translate: -50% -50%;
+  background:
+    linear-gradient(45deg, transparent 44%, currentColor 44%, currentColor 56%, transparent 56%),
+    linear-gradient(-45deg, transparent 44%, currentColor 44%, currentColor 56%, transparent 56%);
+}
+
+/* 「更多会话视图」按钮本体（锚点在里面，光藏锚点按钮还在） */
+html[data-ms-mobile] button[aria-label*='更多会话视图'] {
+  display: none !important;
+}
+
+/* ---- 4b. 斜杠指令菜单：钉在输入卡上方，装得下就完整、装不下内部滚动 ----
+ *
+ * 实测（390×844、r9）：菜单盒 rect = (16, -11, 351×422)，顶边本身就在视口外 11px；
+ * 键盘一开可用高度只剩几十像素，菜单被压掉大半甚至完全看不见。
+ * 收键盘只救一半，另一半靠这里：位置/高度全部由 mobile.js 的 syncSlashGeom() 量出来，
+ * 写 --ms-slash-bottom / --ms-slash-max 两个变量。CSS 里不出现任何写死的坐标。
+ * 只动菜单盒自己，不动官方 overlayAnchor 容器（动容器会让点击坐标整体漂移）。
+ */
+html[data-ms-mobile][data-ms-slash='1'] [data-ms-c~='overlayAnchor'] [data-ms-c~='menu'] {
+  position: fixed !important;
+  left: 12px !important;
+  right: 12px !important;
+  top: auto !important;
+  bottom: var(--ms-slash-bottom, 45vh) !important;
+  width: auto !important;
+  max-height: var(--ms-slash-max, 50vh) !important;
+  overflow-y: auto !important;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ---- 6. 新会话输入卡上的「文件夹 + 下箭头」药丸：手机上不要 ----
+ *
+ * 就是 `button[aria-label='选择工作区']`（图标 class 带 folder，右边跟一个 chevron，
+ * 展开是工作区下拉）。桌面端用它切换"新任务落在哪个工作区"，手机上左栏本来就列着
+ * 全部工作区，这个药丸纯属重复，而且把输入卡那一行挤得很长（用户 2026-10-25 明确要求隐藏）。
+ * 锚点用我们盖的 data-ms-c=workspace + 官方 aria-haspopup，不认哈希类名。
+ * 只在移动端隐藏；桌面端不变。
+ */
+html[data-ms-mobile] button[data-ms-c~='workspace'][aria-haspopup='menu'] {
+  display: none !important;
+}
+
+/* ---- 5. 头部：标题不被成员/状态挤没；右侧工具组改为横向滚动而不是互相叠 ----
+ * 实测（390x844）：不加这几条，标题会被压到 16px 并钻到「智能体团队」下面 6px。
+ * 加了之后标题 63px、工具组 188px 内容在 103px 视口里横滚，零遮挡。 */
+html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] {
+  flex: 0 1 auto;
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions']::-webkit-scrollbar {
+  display: none;
+}
+html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] > * {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='crumbs'] {
+  flex: 1 1 auto;
+  min-width: 4.5em;
+  overflow: hidden;
+}
+html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='crumb'] {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ===== 页头 / 标签行：自适应布局（2026-10-25 用户要求：不要写死）=====
+ *
+ * 原则：CSS 里不出现写死的坐标和宽度，全部用 JS 量出来的变量。
+ * 变量来源：mobile.js 的 msAdaptiveHeader()（在 resize / 转屏 / 视觉视口变化 /
+ * DOM 变化 / 3 秒兜底时重算）：
+ *   --ms-edge          视口右边缘 → 标签行右边的距离（官方自己的右 padding）
+ *   --ms-tabrow-top    标签行顶边（药丸和状态组都跟它对齐）
+ *   --ms-tabrow-h      标签行高度
+ *   --ms-pill-w        用量药丸当前宽度（文案变长会变）
+ *   --ms-acts-w        状态标签组当前宽度（任务数变化会变）
+ *   --ms-tabs-reserve  标签行右侧要给状态组+药丸空出的宽度
+ *   --ms-gap           元素间距
+ * 兜底值只在 JS 首帧还没跑时用。
+ */
+
+html[data-ms-mobile] {
+  --ms-edge: 12px;
+  --ms-tabrow-top: 48px;
+  --ms-tabrow-h: 28px;
+  --ms-pill-w: 64px;
+  --ms-acts-w: 0px;
+  --ms-tabs-reserve: 40vw;
+  --ms-gap: 8px;
+}
+
+/* 1) 用量药丸：贴右边缘、与标签行对齐；宽度由内容决定，封顶 40vw，超出省略号 */
+html[data-ms-mobile] [data-slot='conversation.input.right'] > * {
+  position: fixed;
+  top: var(--ms-tabrow-top);
+  right: var(--ms-edge);
+  z-index: 40;
+  max-width: min(150px, 40vw);
+  display: flex;
+  align-items: center;
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  border-radius: 8px;
+}
+html[data-ms-mobile] [data-slot='conversation.input.right'] [data-ms-c~='trigger'] {
+  background: transparent;
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 2) 状态按钮（后台任务 / 子智能体）：只把这两个提到 tab 行右侧；
+ *    「智能体团队」留在首栏、跟会话标题同一行（用户明确要求）。
+ *    为什么按 data-ms-sidx 分开定位：它们是同一个 flex 容器里的兄弟，
+ *    整组 fixed 会把「智能体团队」一起带走；拆开定位又要处理彼此的横向堆叠，
+ *    所以由 mobile.js 依次给出 --ms-s1-right / --ms-s2-right …（右边距累加）。 */
+html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button[data-ms-sidx] {
+  position: fixed;
+  top: var(--ms-tabrow-top);
+  z-index: 40;
+  align-items: center;
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  border-radius: 8px;
+}
+html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button[data-ms-sidx='1'] {
+  right: var(--ms-s1-right, calc(var(--ms-edge) + var(--ms-pill-w) + var(--ms-gap)));
+}
+html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button[data-ms-sidx='2'] {
+  right: var(--ms-s2-right, calc(var(--ms-edge) + var(--ms-pill-w) + var(--ms-gap)));
+}
+html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button[data-ms-sidx='3'] {
+  right: var(--ms-s3-right, calc(var(--ms-edge) + var(--ms-pill-w) + var(--ms-gap)));
+}
+
+/* 2b) 装不下时的降级（由 mobile.js 的 applyHeaderCompact 控制，级别写在 html[data-ms-compact]）
+ *
+ * 现场（用户截图 2026-10-25）：390 宽下「两个状态芯片 + 用量药丸 + 对话/轨迹」超出十来像素，
+ * tab 被 padding 压到 66px（「轨迹」只剩半个字），第二个芯片的数字被前一个盖住。
+ * 原则：**标签文字优先**。L1 = 芯片只留数字（隐藏文字 span 与 chevron）；L2 = 药丸也只留图形。
+ * 这里只管"变小"，位置仍由 JS 写的 --ms-sN-right 决定。 */
+html[data-ms-mobile] [data-ms-hide='1'] {
+  display: none !important;
+}
+html[data-ms-mobile][data-ms-compact='1'] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button[data-ms-sidx] {
+  width: 2rem !important;
+  min-width: 2rem;
+  max-width: 2rem;
+  padding-inline: 0;
+  justify-content: center;
+  gap: 0;
+}
+html[data-ms-mobile][data-ms-compact='1'] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button[data-ms-sidx] svg {
+  display: none !important;
+}
+html[data-ms-mobile][data-ms-compact='2'] [data-slot='conversation.input.right'] > * {
+  width: 2rem !important;
+  max-width: 2rem;
+  justify-content: center;
+}
+
+/* 3) 标签行：必须保持满宽。
+ *    官方会按容器可用宽度决定收不收 tab：实测宽度 < 约 300px 时「轨迹」被收进
+ *    「更多会话视图」，而那个入口我们藏了 —— tab 会直接消失。
+ *    所以用 padding 留空，而不是缩宽度（官方看容器宽度，仍是满宽）。
+ *    但 padding 不能无限大：实测留 240~291px 时内容区被压到 84px 以下，
+ *    官方把「轨迹」换行到第二行，header 从 76 撑到 133。
+ *    所以预留取「实测值」和「容器宽 - 7rem」的较小者，保证内容区至少 7rem。 */
+html[data-ms-mobile] [data-ms-c~='tabs'] {
+  width: 100% !important;
+  margin-right: 0 !important;
+  padding-right: var(--ms-tabs-reserve) !important;
+  box-sizing: border-box !important;
+}
+/* tab 列表本身不许换行（窄容器里官方可能换行，会多出一行） */
+html[data-ms-mobile] [data-ms-c~='viewTabs'] {
+  flex-wrap: nowrap !important;
+  min-width: 0;
+}
+
+/* 4) 状态标签：字号用 rem（跟着系统字号缩放），里层 span 省略号兜底 */
+html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button {
+  font-size: 0.75rem;
+  padding-inline: 0.375rem;
+  gap: 0.25rem;
+  flex: 0 0 auto;
+  overflow: hidden;
+  white-space: nowrap;
+  min-width: 0;
+}
+html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button > span {
+  max-width: 6.8em;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* 5) 用量面板：从药丸下方展开（官方原本会往上弹，实测 y=-300 跑到屏外） */
+html[data-ms-mobile] [data-slot='conversation.input.right'] [data-ms-c~='panel'] {
+  position: absolute !important;
+  top: calc(100% + var(--ms-gap)) !important;
+  bottom: auto !important;
+  right: 0 !important;
+  left: auto !important;
+  width: min(20rem, calc(100vw - var(--ms-edge) * 2)) !important;
+  max-height: min(70vh, 32rem) !important;
+  overflow-y: auto !important;
+  z-index: 1010 !important;
+  transform: none !important;
+}
+
+/* 6) 空间不够时自动收紧状态标签（由 mobile.js 按实测空间打 data-ms-tight）。
+ *    为什么不是媒体查询：窄屏不是唯一情况 —— 任务数变多、药丸文案变长都会挤，
+ *    断点只能覆盖"屏幕窄"，覆盖不了"内容多"。这里判据是实测：
+ *    标签列表需要多宽 vs 状态组左边还剩多少。 */
+html[data-ms-mobile][data-ms-tight='1'] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button > span {
+  max-width: 4.2em !important;
+}
+
+/* 7) 左栏搜索框的展开态。
+ *
+ * 为什么样式要自己写：官方那个「展开」是 React 状态驱动的（searchSlotExpanded /
+ * searchExpanded 两个类），而窄屏下点放大镜走的是另一条分支 —— 实测 390px 官方
+ * 侧栏直接塌成 rail 再弹一个空面板，那个输入框始终 width:0 / opacity:0。
+ * 桌面宽度（1280）同一个按钮正常展开，所以这是官方窄宽分支的问题。
+ *
+ * 我们的做法：mobile.js 在捕获阶段拿走那一下，给 html 打 data-ms-search=1，
+ * 这里按官方的展开态把尺寸补齐（只认 data-slot / data-ms-c，不写死哈希）。
+ * 输入框本身仍是官方受控组件，真实键入会触发官方过滤（实测 3 行 → 0 行）。
+ *
+ * 作用域必须带 [data-slot='sidebar']：官方搜索面板里也有叫 search 的类
+ * （St8tea_search 等），只按 data-ms-c 命中的话会把那个面板也改了。 */
+html[data-ms-mobile][data-ms-search='1'] [data-slot='sidebar'] [data-ms-c~='searchSlot'] {
+  max-width: none !important;
+}
+
+html[data-ms-mobile][data-ms-search='1'] [data-slot='sidebar'] [data-ms-c~='search'] {
+  width: 100% !important;
+  height: 30px;
+  border: 0.5px solid var(--dsw-alias-border-l4, rgb(0 0 0 / 14%));
+  border-radius: var(--dsw-radius-md, 10px);
+  background: var(--dsw-alias-bg-layer-1, #fff);
+  padding: 0 4px 0 2px;
+}
+
+html[data-ms-mobile][data-ms-search='1'] [data-slot='sidebar'] [data-ms-c~='searchInput'] {
+  width: auto !important;
+  flex: 1 1 auto !important;
+  min-width: 0;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+/* 8) 智能体预设标识（「标准模式 / 创造模式」）。
+ *
+ * 官方在会话页首栏里本来就有这个标识（1280 可见、390 被 display:none 收起），
+ * mobile.js 读它的 textContent 并克隆它的图标，放回输入卡下方那一行统计
+ * （token 速度 / 缓存 / 上下文 同一行）。这里只管长相。
+ *
+ * 尺寸全部对齐那一行官方项（实测）：项高 22、图标 14×14、文字 12px/行高 20px。
+ * 上一版这里写 11px/行高1 且没有图标，导致「文字比旁边高、又没有图标」——被用户点出来。
+ *
+ * 为什么是"只读"而不是按钮：它表达状态，点它没有合理动作。做成按钮点了没反应更糟。
+ * 为什么不用固定宽度：这一行右侧要留给上下文和发送键，空间随屏宽变化。 */
+html[data-ms-mobile] .ms-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 6.6em;
+  height: 22px; /* 与官方项同高：视觉中线才对得上 */
+  margin-right: 6px;
+  font-size: 12px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-tertiary, rgb(0 0 0 / 45%));
+  pointer-events: none; /* 纯状态，别拦截点按 */
+  user-select: none;
+  align-self: center;
+}
+html[data-ms-mobile] .ms-mode-chip > svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+html[data-ms-mobile] .ms-mode-chip-t {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+html[data-ms-mobile] .ms-mode-chip[hidden] {
+  display: none !important;
+}
+/* 极窄屏先牺牲这个标识，别让它把发送键挤出去 */
+@media (max-width: 340px) {
+  html[data-ms-mobile] .ms-mode-chip {
+    max-width: 5em;
+  }
+}
+/* ===== 白屏兜底：主内容空窗期的「加载中」层 =====
+ * 由 mobile.js 的 checkPoster() 控制：主内容区连续 120ms 几乎没有文字才盖，
+ * 内容一回来立刻撤（撤得太快给 1.2s 冷却，避免正常路由切换来回闪）。
+ * 只做观感兜底，不改官方任何渲染逻辑；z-index 在抽屉(950)之下，抽屉打开时仍能操作。
+ * pointer-events:none —— 万一它因为判据失灵一直挂着，也不能把页面点不动。
+ */
+.ms-poster {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--dsw-alias-bg-base, #fff);
+  opacity: 0;
+  transition: opacity 0.18s ease;
+  pointer-events: none;
+}
+html[data-ms-mobile][data-ms-poster='1'] .ms-poster {
+  opacity: 1;
+}
+.ms-poster-box {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-tertiary, rgb(0 0 0 / 45%));
+}
+.ms-poster-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: ms-poster-pulse 1s ease-in-out infinite;
+}
+@keyframes ms-poster-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ms-poster-dot {
+    animation: none;
+    opacity: 0.7;
+  }
+}

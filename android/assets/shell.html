@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,interactive-widget=resizes-content">
+<title>DSH</title>
+<style>
+  :root { color-scheme: light; --accent: #4d6bfe; --line: #e6e7ea; --muted: #8a8f99; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: #fff; color: #111;
+    font: 16px/1.55 -apple-system, "PingFang SC", "Noto Sans CJK SC", "Microsoft YaHei", system-ui, sans-serif;
+    display: flex; align-items: flex-start; justify-content: center;
+    padding: 16px 18px calc(16px + env(safe-area-inset-bottom, 0px));
+    overflow-y: auto;
+  }
+  /* 顶对齐而不是居中：键盘弹起时视口变矮，居中的内容会整体往上跳。 */
+  main { width: 100%; max-width: 420px; margin: 18px auto auto; }
+  .brand { font-weight: 650; font-size: 13px; letter-spacing: .04em; color: var(--accent); margin-bottom: 8px; }
+  h1 { font-size: 20px; line-height: 1.3; margin: 0 0 6px; font-weight: 650; }
+  p { margin: 0 0 8px; color: #444; }
+  .field { display: flex; gap: 8px; margin: 12px 0 4px; }
+  input {
+    flex: 1; min-width: 0; height: 46px; padding: 0 14px; font-size: 16px;
+    border: 1px solid var(--line); border-radius: 12px; background: #fafafa; color: #111;
+    outline: none;
+  }
+  input:focus { border-color: var(--accent); background: #fff; }
+  button {
+    font: inherit; border: 0; border-radius: 12px; height: 48px; padding: 0 18px;
+    background: #f2f3f5; color: #111;
+  }
+  button:active { opacity: .72; }
+  .primary { width: 100%; background: var(--accent); color: #fff; font-weight: 600; margin-top: 10px; height: 46px; }
+  /* 手动输入是备选路径：描边按钮，不与「扫码」争夺主按钮。 */
+  .secondary { width: 100%; background: #fff; color: #111; font-weight: 600; border: 1px solid var(--line); margin-top: 6px; height: 44px; }
+  .ghost { flex: 1; height: 40px; font-size: 13.5px; }
+  .row { display: flex; gap: 8px; margin-top: 8px; }
+  #preview { font-size: 12.5px; color: var(--muted); min-height: 18px; margin: 0; word-break: break-all; }
+  #preview.bad { color: #d33; }
+  /* 帮助：书面语、逻辑编号、长地址允许换行，不允许省略号截断 */
+  .hint { font-size: 12px; line-height: 1.55; color: var(--muted); margin-top: 12px; word-break: break-word; }
+  .hint b { color: #333; font-weight: 600; }
+  .hint ol { margin: 6px 0 0; padding-left: 18px; }
+  .hint li { margin-bottom: 3px; }
+  .hint code { font-family: inherit; color: #333; background: #f4f5f7; border-radius: 4px; padding: 0 4px; word-break: break-all; }
+  #msg { color: #b3261e; }
+  /* 版本小尾巴：平时只有一行浅灰，点一下才展开详情 */
+  #ver { font-size: 11px; color: #c3c7cd; margin-top: 8px; text-align: center; }
+  #diag { font-size: 11px; color: #b0b4bb; white-space: pre-wrap; word-break: break-all; margin-top: 6px; }
+  .hidden { display: none !important; }
+  button[disabled] { opacity: .55; }
+
+  /* 返回：只在「有主界面可回」时出现（原生给 canReturn），44dp 触区 */
+  .topbar { display: flex; align-items: center; margin: -16px 0 0 -6px; }
+  .topbar .back {
+    display: inline-flex; align-items: center; gap: 4px;
+    height: 44px; min-width: 44px; padding: 0 12px 0 4px;
+    background: transparent; color: var(--accent); font-size: 15px; font-weight: 500;
+    border-radius: 10px;
+  }
+  .topbar .back:active { opacity: .55; }
+  .topbar .back svg { width: 18px; height: 18px; }
+  /* 扫码：主入口。实时取景由原生 ScanActivity 提供，这里只负责调用。 */
+  #scan { margin-top: 10px; }
+  .scan-alt { width: 100%; height: 36px; margin-top: 2px; background: transparent; color: var(--accent); font-size: 13.5px; }
+  .or { display: flex; align-items: center; gap: 10px; margin: 12px 0 0; color: var(--muted); font-size: 12px; }
+  .or::before, .or::after { content: ""; height: 1px; background: var(--line); flex: 1; }
+  .divider { height: 1px; background: var(--line); margin: 16px 0 0; }
+  #scan-msg { font-size: 12.5px; line-height: 1.6; margin: 4px 0 0; min-height: 18px; word-break: break-word; color: var(--muted); }
+  #scan-msg.bad { color: #b3261e; }
+
+  /* 登录（可选）与诊断 */
+  .remember { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12.5px; color: #444; }
+  .remember input { flex: 0 0 auto; width: 16px; height: 16px; padding: 0; }
+  #authmsg { font-size: 12.5px; line-height: 1.5; min-height: 16px; margin: 4px 0 0; color: #2f6b2f; word-break: break-word; }
+  #authmsg.bad { color: #b3261e; }
+  #copyDiag { margin-top: 8px; height: 34px; font-size: 12.5px; padding: 0 12px; }
+
+  /* 矮屏（如 320×568）：优先保证扫码/地址/刷新/帮助都在首屏，隐去品牌与长描述 */
+  @media (max-height: 620px) {
+    main { margin-top: 8px; }
+    .brand { display: none; }
+    #desc { display: none; }
+    .hint { margin-top: 8px; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <div id="topbar" class="topbar hidden">
+    <button id="back" class="back" type="button" aria-label="返回主界面">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+      返回
+    </button>
+  </div>
+  <div class="brand">DSH</div>
+  <h1 id="title">连接电脑</h1>
+  <p id="desc">扫描电脑端「移动端访问」面板中的二维码，或手动填写访问地址。</p>
+  <p id="scan-msg" class="hidden"></p>
+
+  <section id="setup">
+    <button id="scan" class="primary" type="button">扫码</button>
+    <button id="scanGalleryBtn" class="scan-alt" type="button">从相册选择二维码</button>
+    <input id="scanCam" class="hidden" type="file" accept="image/*" capture="environment">
+    <input id="scanGallery" class="hidden" type="file" accept="image/*">
+
+    <div class="or"><span>手动填写</span></div>
+    <div class="field">
+      <input id="addr" type="text" inputmode="url" autocapitalize="off" autocorrect="off"
+             autocomplete="off" spellcheck="false" placeholder="地址与端口号">
+      <button id="paste" type="button">粘贴</button>
+    </div>
+    <p id="preview"></p>
+    <button id="go" class="secondary" type="button">连接</button>
+
+    <!-- 登录（可选）：0.9.4 起 App 自己也能配密码。
+         这里填一次，原生会用密码换登录 Cookie 并落盘（换 IP、重启都免登录）。 -->
+    <div class="or"><span>登录（需要密码时）</span></div>
+    <div class="field">
+      <input id="pw" type="password" autocomplete="current-password" placeholder="电脑端访问密码">
+      <button id="login" type="button">登录</button>
+    </div>
+    <label id="rememberRow" class="remember">
+      <input id="remember" type="checkbox" checked> 记住密码（存本机，换密码后自动重登）
+    </label>
+    <p id="authmsg"></p>
+
+    <div id="refreshRow" class="row hidden">
+      <button id="refresh" class="ghost" type="button">刷新</button>
+      <button id="refreshClean" class="ghost" type="button">清除缓存并刷新</button>
+    </div>
+
+    <!-- 悬浮球健康 30 秒后会自动隐藏，所以这些入口必须留在这里：
+         推送自检（唯一入口）、退出（唯一主动退出入口）。 -->
+    <div class="row">
+      <button id="pushCheck" class="ghost" type="button">推送自检</button>
+      <button id="quitApp" class="ghost" type="button">退出</button>
+    </div>
+
+    <div class="hint">
+      <b>连接方法</b>
+      <ol>
+        <li>电脑端 DSH 处于运行状态。</li>
+        <li>手机与电脑连接至同一局域网。</li>
+        <li>输入 <code>IP:端口</code>（默认端口 <code>3081</code>）或完整地址；地址将自动补全为 <code>http://IP:端口/m</code>。</li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="error" class="hidden">
+    <p id="msg"></p>
+    <button id="retry" class="primary" type="button">刷新</button>
+    <div class="row">
+      <button id="retryClean" class="ghost" type="button">清除缓存并刷新</button>
+      <button id="chrome" class="ghost" type="button">浏览器打开</button>
+    </div>
+    <div class="row">
+      <button id="scanErr" class="ghost" type="button">重新扫码</button>
+      <button id="change" class="ghost" type="button">修改地址</button>
+    </div>
+    <div class="hint">
+      <b>连接失败的常见原因</b>
+      <ol>
+        <li>电脑端 DSH 未运行。</li>
+        <li>手机与电脑不在同一局域网。</li>
+        <li>电脑 IP 地址已变更，建议重新扫码。</li>
+      </ol>
+    </div>
+  </section>
+
+  <div id="ver">v…</div>
+  <button id="copyDiag" class="secondary hidden" type="button">复制诊断</button>
+  <div id="diag" class="hidden"></div>
+</main>
+<!--SCANLIB-->
+<!--INIT-->
+<script>
+(function () {
+  var S = window.__shellInit || { kind: 'setup' };
+  var bridge = window.Shell || null;
+  var $ = function (id) { return document.getElementById(id); };
+
+  var addr = $('addr');
+  var preview = $('preview');
+  var scanMsg = $('scan-msg');
+
+  // 版本小尾巴：默认只显示 App 版本，点一下展开 WebView 和当前地址
+  var verEl = $('ver');
+  var diagEl = $('diag');
+  var copyDiagEl = $('copyDiag');
+  verEl.textContent = 'v' + (S.appVer || '…') + (S.loggedIn ? ' · 已登录' : '');
+
+  function diagText() {
+    var ua = S.agent || '';
+    var m = /Chrome\/([\d.]+)/.exec(ua);
+    var line = 'WebView ' + (m ? m[1] : '未知');
+    if (S.current) line += '\n当前 ' + S.current;
+    // 0.9.4：原生那边的探针/登录态/最近错误也一起摊开（没 adb 也能抄给开发者）
+    var native = '';
+    try {
+      if (bridge && typeof bridge.diag === 'function') native = String(bridge.diag() || '');
+    } catch (e) {
+      native = '';
+    }
+    if (native) line += '\n' + native;
+    return line;
+  }
+  diagEl.textContent = diagText();
+
+  function toggleDiag() {
+    var hidden = diagEl.classList.toggle('hidden');
+    copyDiagEl.classList.toggle('hidden', hidden);
+    if (!hidden) diagEl.textContent = diagText();
+  }
+  verEl.addEventListener('click', toggleDiag);
+  copyDiagEl.addEventListener('click', function () {
+    var ok = false;
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = diagText();
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+    } catch (e) {
+      ok = false;
+    }
+    copyDiagEl.textContent = ok ? '已复制' : '复制失败，请长按上方文字';
+    setTimeout(function () { copyDiagEl.textContent = '复制诊断'; }, 2000);
+  });
+
+  // ---------------- 返回主界面 ----------------
+  // 只有原生确认工作台页面仍在（或可重建）时才显示；冷启动尚未连接时不显示。
+  function shouldShowBack(init) {
+    return !!(init && init.canReturn === true);
+  }
+  function shouldShowRefresh(init) {
+    return !!(init && init.canRefresh === true);
+  }
+  if (shouldShowBack(S)) $('topbar').classList.remove('hidden');
+  if (shouldShowRefresh(S)) $('refreshRow').classList.remove('hidden');
+  $('back').addEventListener('click', function () {
+    if (bridge && typeof bridge.backToWorkbench === 'function') bridge.backToWorkbench();
+  });
+
+  function show(kind) {
+    var setup = kind === 'setup';
+    $('setup').classList.toggle('hidden', !setup);
+    $('error').classList.toggle('hidden', setup);
+    if (setup) {
+      $('title').textContent = '连接电脑';
+      $('desc').classList.remove('hidden');
+      $('desc').textContent = '扫描电脑端「移动端访问」面板中的二维码，或手动填写访问地址。';
+    }
+  }
+
+  function updatePreview() {
+    var raw = addr.value.trim();
+    if (!raw) {
+      preview.textContent = '';
+      preview.classList.remove('bad');
+      return null;
+    }
+    var url = bridge ? bridge.resolve(raw) : '';
+    if (!url) {
+      preview.textContent = '地址格式无效，请检查后重新输入';
+      preview.classList.add('bad');
+      return null;
+    }
+    preview.classList.remove('bad');
+    preview.textContent = '将打开 ' + url;
+    return url;
+  }
+
+  function fillSaved() {
+    if (addr.value) return;
+    if (S.saved) {
+      addr.value = String(S.saved).replace(/^https?:\/\//, '').replace(/\/m$/, '').replace(/\/$/, '');
+      updatePreview();
+      return;
+    }
+    // 备选路径：从微信/系统相机复制地址后进入 App，自动填入剪贴板中的地址。
+    try {
+      if (!bridge || typeof bridge.paste !== 'function') return;
+      var clip = String(bridge.paste() || '');
+      var m = clip.match(/https?:\/\/[^\s"']+|\b\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?(?:\/m)?\b/);
+      if (m) {
+        addr.value = m[0].replace(/^https?:\/\//, '').replace(/\/m$/, '').replace(/\/$/, '');
+        updatePreview();
+      }
+    } catch (e) { /* 读取失败时保持手动输入 */ }
+  }
+
+  function go() {
+    var raw = addr.value.trim();
+    if (!raw) { addr.focus(); return; }
+    if (!bridge) { preview.textContent = '请在 App 内打开本页面'; preview.classList.add('bad'); return; }
+    if (!updatePreview()) { addr.focus(); return; }
+    var goBtn = $('go');
+    goBtn.disabled = true;
+    goBtn.textContent = '正在连接…';
+    bridge.connect(raw);
+  }
+
+  addr.addEventListener('input', updatePreview);
+  addr.addEventListener('keydown', function (e) { if (e.key === 'Enter') go(); });
+  $('go').addEventListener('click', go);
+
+  $('paste').addEventListener('click', function () {
+    if (!bridge) return;
+    var t = '';
+    try { t = bridge.paste() || ''; } catch (e) { t = ''; }
+    if (t) { addr.value = t; updatePreview(); }
+    addr.focus();
+  });
+
+  // ---------------- 登录（可选，0.9.4） ----------------
+  // 密码只在本地页用：原生拿它换登录 Cookie 并落盘（不在网页里存明文）。
+  var pwEl = $('pw');
+  var rememberEl = $('remember');
+  var authMsg = $('authmsg');
+
+  function setAuthMsg(text, bad) {
+    authMsg.textContent = text || '';
+    authMsg.classList.toggle('bad', !!bad);
+  }
+
+  function loginNow() {
+    if (!bridge || typeof bridge.login !== 'function') {
+      setAuthMsg('当前安装包不支持在这里登录，请用电脑端扫码', true);
+      return;
+    }
+    var v = pwEl.value;
+    if (!v) { pwEl.focus(); return; }
+    setAuthMsg('正在登录…', false);
+    bridge.login(v, !!rememberEl.checked);
+    pwEl.value = '';
+    // 成功后原生直接进工作台（本地页会收起）；失败由原生提示，不留半截状态
+  }
+
+  $('login').addEventListener('click', loginNow);
+  pwEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') loginNow(); });
+  if (S.loggedIn) setAuthMsg('已登录（登录态存在本机，换 WiFi 也不用重登）', false);
+
+  $('retry').addEventListener('click', function () {
+    if (!bridge) return;
+    bridge.refreshWorkbench(false);
+  });
+  $('retryClean').addEventListener('click', function () {
+    if (!bridge) return;
+    bridge.refreshWorkbench(true);
+  });
+  $('refresh').addEventListener('click', function () {
+    if (bridge) bridge.refreshWorkbench(false);
+  });
+  $('refreshClean').addEventListener('click', function () {
+    if (bridge) bridge.refreshWorkbench(true);
+  });
+  $('pushCheck').addEventListener('click', function () {
+    if (bridge && typeof bridge.pushCheck === 'function') bridge.pushCheck();
+  });
+  $('quitApp').addEventListener('click', function () {
+    if (bridge && typeof bridge.quit === 'function') bridge.quit();
+  });
+  $('change').addEventListener('click', function () { show('setup'); fillSaved(); addr.focus(); });
+  $('chrome').addEventListener('click', function () { if (bridge) bridge.openChrome(); });
+
+  // ---------------- 扫码 ----------------
+  // 主路径：原生实时取景（Shell.scan）。备选：相册选图，页内 jsQR 解码。
+  function pickQrPayload(text) {
+    if (typeof text !== 'string') return '';
+    var s = text.trim();
+    if (!s || s.length > 2048 || /[\r\n]/.test(s)) return '';
+    if (!/^https?:\/\//i.test(s)) return '';
+    try {
+      var u = new URL(s);
+      if (!u.hostname) return '';
+    } catch (e) { return ''; }
+    return s;
+  }
+
+  function isLikelyImage(file) {
+    return !!(file && typeof file.type === 'string' && file.type.indexOf('image/') === 0);
+  }
+
+  function setScanMsg(text, bad) {
+    scanMsg.textContent = text || '';
+    scanMsg.classList.toggle('hidden', !text);
+    scanMsg.classList.toggle('bad', !!bad);
+  }
+
+  function decodeAt(img, max) {
+    if (!window.jsQR) return '';
+    var w = img.naturalWidth || img.width || 0;
+    var h = img.naturalHeight || img.height || 0;
+    if (!w || !h) return '';
+    var scale = Math.min(1, max / Math.max(w, h));
+    var cw = Math.max(1, Math.round(w * scale));
+    var ch = Math.max(1, Math.round(h * scale));
+    var canvas = document.createElement('canvas');
+    canvas.width = cw;
+    canvas.height = ch;
+    var ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return '';
+    ctx.drawImage(img, 0, 0, cw, ch);
+    try {
+      var data = ctx.getImageData(0, 0, cw, ch);
+      // attemptBoth：拍摄屏幕时可能出现反色/低对比。
+      var hit = window.jsQR(data.data, cw, ch, { inversionAttempts: 'attemptBoth' });
+      return hit && hit.data ? String(hit.data) : '';
+    } catch (e) { return ''; }
+  }
+
+  function decodeImageFile(file) {
+    return new Promise(function (resolve, reject) {
+      if (!isLikelyImage(file)) { reject(new Error('not-image')); return; }
+      var url = URL.createObjectURL(file);
+      var img = new Image();
+      img.onload = function () {
+        var out = '';
+        var sizes = [1200, 2400];
+        for (var i = 0; i < sizes.length && !out; i++) out = decodeAt(img, sizes[i]);
+        URL.revokeObjectURL(url);
+        resolve(out);
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        // WebView 解不开（HEIC/超大图/带透明通道的奇怪格式）时，交给 createImageBitmap + canvas 再来一次
+        if (typeof createImageBitmap === 'function') {
+          createImageBitmap(file).then(function (bmp) {
+            var canvas = document.createElement('canvas');
+            var scale = Math.min(1, 2400 / Math.max(bmp.width, bmp.height));
+            canvas.width = Math.max(1, Math.round(bmp.width * scale));
+            canvas.height = Math.max(1, Math.round(bmp.height * scale));
+            canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+            var out = '';
+            var sizes = [1200, 2400];
+            for (var i = 0; i < sizes.length && !out; i++) {
+              out = decodeAt(canvas, Math.min(sizes[i], canvas.width));
+            }
+            if (bmp.close) bmp.close();
+            if (out) resolve(out); else reject(new Error('decode'));
+          }).catch(function () { reject(new Error('decode')); });
+          return;
+        }
+        reject(new Error('decode'));
+      };
+      img.src = url;
+    });
+  }
+
+  function onScanFile(e) {
+    var file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!window.jsQR) {
+      setScanMsg('当前安装包缺少二维码解码组件，请手动填写地址', true);
+      return;
+    }
+    setScanMsg('正在识别二维码…', false);
+    decodeImageFile(file).then(function (text) {
+      var url = pickQrPayload(text);
+      if (!url) {
+        setScanMsg('未识别到 DSH 连接地址，请更换图片后重试', true);
+        return;
+      }
+      addr.value = url;
+      updatePreview();
+      setScanMsg('识别成功，正在连接…', false);
+      if (!bridge) { setScanMsg('请在 App 内打开本页面', true); return; }
+      bridge.connect(url); // 票据地址直接进工作台，密码开启时同样无需输入
+    }).catch(function () {
+      setScanMsg('无法读取该图片，请更换图片或手动填写地址', true);
+    });
+  }
+
+  function startScan(which) {
+    var input = $(which);
+    if (!input) return;
+    setScanMsg('', false);
+    input.value = '';
+    input.click();
+  }
+
+  function startLiveScan() {
+    if (bridge && typeof bridge.scan === 'function') {
+      setScanMsg('', false);
+      bridge.scan();
+      return;
+    }
+    // 旧版原生没有实时取景接口时，退回系统相机拍照 + 页内解码。
+    startScan('scanCam');
+  }
+
+  // 权限被拒/相机不可用时由原生调用这两个兜底入口。
+  window.__msPickGallery = function () { startScan('scanGallery'); };
+  window.__msPickSystemCamera = function () { startScan('scanCam'); };
+
+  $('scan').addEventListener('click', startLiveScan);
+  $('scanErr').addEventListener('click', startLiveScan);
+  $('scanGalleryBtn').addEventListener('click', function () { startScan('scanGallery'); });
+  $('scanCam').addEventListener('change', onScanFile);
+  $('scanGallery').addEventListener('change', onScanFile);
+
+  if (S.kind === 'error') {
+    $('title').textContent = '无法连接电脑';
+    $('desc').classList.add('hidden');
+    $('msg').textContent = S.msg || '加载失败。';
+    show('error');
+  } else {
+    show('setup');
+    if (S.saved) {
+      fillSaved();
+    } else {
+      setTimeout(function () { try { addr.focus(); } catch (e) {} }, 280);
+    }
+  }
+})();
+</script>
+</body>
+</html>

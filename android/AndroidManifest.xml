@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  手机版外壳。只是一个 WebView 窗口，页面来自电脑上的网关（默认 3081 端口）。
+
+  targetSdk 固定 34：35 会在 Android 15 上强制「边到边」，内容和状态栏重叠，
+  adjustResize（键盘弹起时窗口变矮）就不灵了 —— 而键盘贴着输入框是这一版的重点。
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.lexin.dshmobile">
+
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 实时取景扫码：只在点「扫码」时申请；拒绝也能用相册/系统相机拍（降级路径） -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- 相机不是必需硬件：没有相机的设备仍可手填地址/相册导入 -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <!-- 断网感知：只收系统"网断了/网好了"回调，不读任何网络内容（普通权限，装时不弹框） -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- 任务完成通知（Android 13+ 还要在首次进工作台时动态申请一次） -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- 后台常驻："等推送"的长连接必须待在前台服务里，否则随时被系统回收 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <!-- connectedDevice 专用：维持与已配对电脑的连接（避开 Android 15 对
+         dataSync 的 24 小时累计 6 小时限制） -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <!-- connectedDevice 的「前置权限」：Android 14+ 起 startForeground(..., CONNECTED_DEVICE)
+         必须至少持有其中一个，否则直接抛 SecurityException，服务静默退化成普通后台服务
+         （一退后台就被 cached app freezer 冻住，表现就是后台收不到推送）。
+         这三个都是 normal 权限，装机不弹框。 -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+    <!-- 一键「忽略电池优化」：国产 ROM 的省电策略会在息屏后断网/冻结进程，
+         有了这条权限才能直接弹系统确认框，不用让用户自己去设置里翻。 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
+    <application
+        android:allowBackup="false"
+        android:hardwareAccelerated="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme"
+        android:usesCleartextTraffic="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- 实时取景扫码：纯原生 Camera1 预览 + ZXing 解码，竖屏；只能由 App 内部拉起 -->
+        <activity
+            android:name=".ScanActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:theme="@style/ScanTheme" />
+
+        <!-- 拍照要一个可写的 content:// 给相机 App；不依赖 AndroidX 的 FileProvider -->
+        <provider
+            android:name=".CaptureProvider"
+            android:authorities="com.lexin.dshmobile.capture"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
+        <!-- 任务完成推送：前台服务持有一条到网关的 SSE 长连接。
+             类型用 connectedDevice（维持与已配对电脑的连接），
+             不用 dataSync —— 后者在 Android 15 上有 6 小时/天的累计上限。 -->
+        <service
+            android:name=".PushService"
+            android:exported="false"
+            android:foregroundServiceType="connectedDevice" />
+    </application>
+</manifest>

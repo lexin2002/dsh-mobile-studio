@@ -1,0 +1,9 @@
+# 统一换行，避免 Windows/Linux 混着提交后满天飞的 diff
+* text=auto eol=lf
+
+# 二进制：不要改动
+*.png binary
+*.jar binary
+*.wav binary
+*.ogg binary
+*.mp3 binary

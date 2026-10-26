@@ -1,0 +1,23 @@
+# 通用
+node_modules/
+*.log
+.DS_Store
+Thumbs.db
+
+# 打包产物与中间目录（图标 png 是提交的，构建时会被重新生成）
+dist/
+android/build/
+
+# 签名材料：绝对不要提交
+*.keystore
+*.jks
+keystore.pass
+.env
+
+# 预览/测试产物
+tools/preview-panels.html
+
+# 本机私有文档（不随仓库发布）
+docs/
+# npm 打包产物
+*.tgz

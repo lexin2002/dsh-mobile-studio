@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 自适应图标背景：取官方图标白底的实测色 #F7F8F9 -->
+    <color name="ic_launcher_background">#E8F0FC</color>
+</resources>
