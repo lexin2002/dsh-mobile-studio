@@ -36,6 +36,17 @@ public class ShellBridge {
         });
     }
 
+    /** 地址 +（可选）密码一次走完：有密码就先换登录 Cookie 再进工作台。 */
+    @JavascriptInterface
+    public void connectWithPassword(final String input, final String password, final boolean remember) {
+        host.runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                host.connectWithPassword(input, password, remember);
+            }
+        });
+    }
+
     /** P0：本地页桥方法，工作台不可调（菜单走 host.openInChrome 直调，不受影响）。 */
     @JavascriptInterface
     public void openChrome() {

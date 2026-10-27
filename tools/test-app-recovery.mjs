@@ -150,11 +150,12 @@ has('捕获未处理的 Promise', mobile, "window.addEventListener('unhandledrej
 has('上报节流 1s', mobile, 'now - lastErrAt < 1000');
 has('页面版本 r14', mobile, "window.__msVersion = '2026-10-27/r14'");
 
-// ---------------- 8. 本地页有密码入口与诊断 ----------------
+// ---------------- 8. 本地页：一个表单走完连接（地址 + 可选密码） ----------------
 has('本地页有密码框', shell, 'id="pw"');
-has('本地页有登录按钮', shell, 'id="login"');
+has('本地页只有一个连接按钮', shell, 'id="go"');
+notHas('本地页不再有独立的登录按钮', shell, 'id="login"');
 has('本地页可记住密码', shell, 'id="remember"');
-has('本地页调桥登录', shell, 'bridge.login(v, !!rememberEl.checked)');
+has('本地页一次连接带密码', shell, 'bridge.connectWithPassword(raw, pw, remember)');
 has('本地页显示登录态', shell, 'S.loggedIn ? \' · 已登录\'');
 has('本地页有复制诊断', shell, 'id="copyDiag"');
 has('诊断把原生信息拼进来', shell, "typeof bridge.diag === 'function'");

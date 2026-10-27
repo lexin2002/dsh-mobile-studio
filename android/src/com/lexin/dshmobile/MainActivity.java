@@ -768,6 +768,11 @@ public class MainActivity extends Activity {
     private String postLogin(String pw) {
         String base = currentUrl;
         if (base == null || base.isEmpty()) base = prefs.getString(KEY_URL, null);
+        return postLoginAt(base, pw);
+    }
+
+    /** 同上，但用调用方给的地址（配置页「连接」时 currentUrl 还没切过去）。 */
+    private String postLoginAt(String base, String pw) {
         if (base == null || base.isEmpty()) return "error";
         String origin = originOf(base);
         if (origin == null) return "error";
@@ -1597,6 +1602,68 @@ public class MainActivity extends Activity {
     void connectInput(String raw) {
         if (!shellMode) return;
         applyScannedUrl(raw);
+    }
+
+    /**
+     * 配置页「连接」：地址 +（可选）密码，一次完成。
+     * 以前分成「连接」和「登录」两个按钮 —— 填了密码点连接，还是落到登录页，
+     * 必须再点一次登录才进得去（用户 2026-10-27 明确骂过这个设计）。
+     * 现在：有密码就先换 Cookie 再进；没密码直接进（真开了密码会落到登录页）。
+     */
+    void connectWithPassword(String raw, String password, boolean remember) {
+        String u = normalize(raw);
+        if (u == null) {
+            Toast.makeText(this, "地址不对：填 IP 或 IP:端口", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final String store = workbenchUrlFor(u);
+        if (store == null) return;
+        prefs.edit().putString(KEY_URL, store).apply();
+        final String pw = password == null ? "" : password.trim();
+        prefs.edit().putBoolean(KEY_REMEMBER_PW, remember).apply();
+        if (!pw.isEmpty() && remember) prefs.edit().putString(KEY_LOGIN_PW, pw).apply();
+        if (!pw.isEmpty() && !remember) prefs.edit().remove(KEY_LOGIN_PW).apply();
+        hideBanner();
+        final String target = u;
+        if (pw.isEmpty()) {
+            loadTarget(target, store);
+            return;
+        }
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final String result = postLoginAt(target, pw);
+                uiHandler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (isFinishing()) return;
+                        if ("ok".equals(result)) {
+                            loadTarget(target, store);
+                        } else if ("bad".equals(result)) {
+                            prefs.edit().remove(KEY_LOGIN_PW).apply();
+                            Toast.makeText(MainActivity.this, "密码不正确", Toast.LENGTH_SHORT).show();
+                            authMsgFromShell("密码不正确，请重新输入");
+                        } else {
+                            Toast.makeText(MainActivity.this, "连不上电脑：检查地址和同一局域网", Toast.LENGTH_SHORT).show();
+                            authMsgFromShell("连不上电脑：检查地址和同一局域网");
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    /** 把连接结果回写到本地页的提示行（页面里有 #authmsg 就显示）。 */
+    private void authMsgFromShell(String text) {
+        try {
+            if (shellWeb == null) return;
+            String quoted = org.json.JSONObject.quote(text == null ? "" : text);
+            shellWeb.evaluateJavascript(
+                    "try{var e=document.getElementById('authmsg');if(e){e.textContent=" + quoted + ";}}catch(x){}",
+                    null);
+        } catch (Exception e) {
+            /* 提示失败不影响流程 */
+        }
     }
 
     /**

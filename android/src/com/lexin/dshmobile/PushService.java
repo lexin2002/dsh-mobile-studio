@@ -80,23 +80,26 @@ public class PushService extends Service {
      * 「音源换代」进度：0/1 = 还没生效（还要再试一次），2 = 已生效。
      * 用计数而不是布尔，是为了失败时最多再试一次就停手 —— 每次换代都要删渠道，
      * 用户手选过的铃声会跟着丢一次，不能因为某台机器怎么都建不出声音就每次启动都删。
-     * 0.9.18 起自带音换成「同一段水滴里截出来的三个片段、随机播其中一个」，
-     * key 升到 soundV018：老设备必须再换代一次才能拿到这三个渠道。
+     * 0.1.0(vc56) 起自带音回到「一段」，key 升到 soundV054：老设备再换代一次，
+     * 把 0.9.18 留下的三条随机音渠道删干净，通知设置里只留一条「任务完成」。
      */
-    private static final String KEY_SOUND_STEP = "soundV018";
+    private static final String KEY_SOUND_STEP = "soundV054";
     /**
      * 自带提示音的三段（同一段水滴录音里截出的三次滴水）。
      * 三条渠道各绑一段，发通知时随机挑一条 —— 渠道声音建好就锁死，
      * 「每次不一样」只能靠多条渠道实现。
      */
-    private static final int[] SOUND_RAW = {R.raw.notify_drop1, R.raw.notify_drop2, R.raw.notify_drop3};
     /**
-     * 写进媒体库的那份提示音的 content:// URI 缓存（三段各一条）。
+     * 自带提示音只有一段（用户 2026-10-27 从三段里选了第 2 段）。
+     * 曾经做过「三段随机播」——那需要三条渠道，系统通知设置里会多出三条同名渠道，
+     * 而且小米上任何一条建失败都会变成"声音时有时无"。现在一条渠道、一个声音。
+     */
+    private static final int SOUND_RES = R.raw.notify_drop;
+    /**
+     * 写进媒体库的那份提示音的 content:// URI 缓存。
      * pickSound() 只读它、不做媒体库查询 —— 启动路径上不许有 IO（LESSONS 6.67）。
      */
     private static final String KEY_MEDIA_SOUND = "mediaSoundUri";
-    private static final String KEY_MEDIA_SOUND_2 = "mediaSoundUri2";
-    private static final String KEY_MEDIA_SOUND_3 = "mediaSoundUri3";
     private static final int SEEN_MAX = 200;
 
     private volatile boolean running = false;
@@ -190,7 +193,7 @@ public class PushService extends Service {
             // 全 App 生命周期里**只在这里**写一次媒体库（三段 mp3，加起来 27KB）。
             // pickSound() 只读 prefs 缓存：启动路径上做 IO 写入会重演 LESSONS 6.67
             // 的 ANR（ForegroundServiceDidNotStartInTime → 闪退）。
-            if (cachedMediaSound(this, SOUND_RAW.length - 1) == null) ensureMediaSound(this);
+            if (cachedMediaSound(this) == null) ensureMediaSound(this);
             if (!channelsJustReset) rebuildChannels(this);
             boolean ok = channelSoundOk(this, true) && channelSoundOk(this, false);
             prefs(this).edit().putInt(KEY_SOUND_STEP, ok ? 2 : soundVer + 1).commit();
@@ -587,15 +590,8 @@ public class PushService extends Service {
         }
     }
 
-    private static final java.util.Random SOUND_ROLL = new java.util.Random();
-
-    /**
-     * 任务完成类通知在三条同代渠道里随机挑一条 —— 渠道声音建好就锁死，
-     * "每次听起来不一样"只能靠多条渠道实现。其它类型（需要你处理）仍走单条渠道。
-     */
     private static String channelFor(Context ctx, String kind) {
-        if (!"done".equals(kind)) return channelId(ctx, false);
-        return channelId(ctx, true, SOUND_ROLL.nextInt(SOUND_RAW.length));
+        return channelId(ctx, "done".equals(kind));
     }
 
     private void deliver(String id, String kind, String sessionId, String title, String detail) {
@@ -714,23 +710,11 @@ public class PushService extends Service {
      * 用代而不是写死 id：渠道的声音创建后不可改，改声音只能换新 id。
      */
     static String channelId(Context ctx, boolean tasks) {
-        // 任务完成：三条同代渠道一起建（声音各绑一段水滴），发通知时随机挑
-        if (tasks) {
-            for (int i = 0; i < SOUND_RAW.length; i++) channelId(ctx, true, i);
-            return channelIdFor(ctx, true, 0);
-        }
-        return channelId(ctx, false, 0);
-    }
-
-    /** 建（或取）某一条具体渠道；variant 只对任务完成类有效。 */
-    static String channelId(Context ctx, boolean tasks, int variant) {
-        int v = tasks ? soundVariant(variant) : 0;
         String fallback = tasks ? "dsh-tasks" : "dsh-attention";
         try {
             if (Build.VERSION.SDK_INT < 26) return fallback;
-            String id = channelIdFor(ctx, tasks, v);
-            String name = tasks ? (v == 0 ? "任务完成" : "任务完成（音效 " + (v + 1) + "）")
-                    : "需要你处理";
+            String id = channelIdFor(ctx, tasks);
+            String name = tasks ? "任务完成" : "需要你处理";
             String desc = tasks ? "电脑上的任务完成、出错或中断时提醒"
                     : "计划待批准、需要回答或连接中断时提醒";
             // 音源必须在建渠道**之前**选定：渠道属性创建后系统就锁死了。
@@ -738,7 +722,7 @@ public class PushService extends Service {
             // 但那正是 MIUI 的死循环：它把 android.resource:// 存成 null，
             // 删一次重建还是同一个坏 URI，白删一遍（顺带把用户选的声音也删了）。
             // pickSound 现在按「一定能被系统认」的顺序挑，轮不到建完才发现。
-            ensureChannel(ctx, id, name, desc, pickSound(ctx, v));
+            ensureChannel(ctx, id, name, desc, pickSound(ctx));
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
             NotificationChannel ch = nm == null ? null : nm.getNotificationChannel(id);
             if (ch != null && ch.getSound() == null) {
@@ -752,16 +736,10 @@ public class PushService extends Service {
         }
     }
 
-    /** 渠道 id 只由「代」和「第几段音」决定；单独抽出来，好让自检在不重建渠道时查它。 */
+    /** 渠道 id 只由「代」决定；单独抽出来，好让自检在不重建渠道时查它。 */
     private static String channelIdFor(Context ctx, boolean tasks) {
-        return channelIdFor(ctx, tasks, 0);
-    }
-
-    private static String channelIdFor(Context ctx, boolean tasks, int variant) {
         int gen = prefs(ctx).getInt(KEY_GEN, 0);
-        String base = (tasks ? "dsh-tasks-" : "dsh-attention-") + gen;
-        int v = soundVariant(variant);
-        return v == 0 ? base : base + "-" + (v + 1);
+        return (tasks ? "dsh-tasks-" : "dsh-attention-") + gen;
     }
 
     /** 当前代的渠道到底有没有声音：升级换代只能靠它判断成没成。 */
@@ -770,12 +748,8 @@ public class PushService extends Service {
             if (Build.VERSION.SDK_INT < 26) return true;
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return false;
-            int count = tasks ? SOUND_RAW.length : 1;
-            for (int i = 0; i < count; i++) {
-                NotificationChannel ch = nm.getNotificationChannel(channelIdFor(ctx, tasks, i));
-                if (ch == null || ch.getSound() == null) return false;
-            }
-            return true;
+            NotificationChannel ch = nm.getNotificationChannel(channelIdFor(ctx, tasks));
+            return ch != null && ch.getSound() != null;
         } catch (Exception e) {
             return false;
         }
@@ -795,10 +769,11 @@ public class PushService extends Service {
             java.util.Collections.addAll(old,
                     "dsh-tasks", "dsh-tasks-v2", "dsh-tasks-v3",
                     "dsh-attention", "dsh-attention-v3");
-            // 上一代的三条任务渠道（含 -2/-3 两条随机音）统统删掉
+            // 上一代渠道（含 0.9.18 那三条随机音渠道 dsh-tasks-<gen>-2/-3）一起删掉
             old.add("dsh-attention-" + gen);
             old.add("dsh-tasks-" + gen);
-            for (int i = 1; i < SOUND_RAW.length; i++) old.add("dsh-tasks-" + gen + "-" + (i + 1));
+            old.add("dsh-tasks-" + gen + "-2");
+            old.add("dsh-tasks-" + gen + "-3");
             dropChannels(ctx, old.toArray(new String[0]));
             channelId(ctx, true);
             channelId(ctx, false);
@@ -851,15 +826,6 @@ public class PushService extends Service {
      * ForegroundServiceDidNotStartInTime，直接闪退。
      */
     static Uri pickSound(Context ctx) {
-        return pickSound(ctx, 0);
-    }
-
-    /**
-     * 第 variant 条渠道该用哪个音源。
-     * 用户自己挑过铃声时三条渠道都用它（尊重用户选择，不再随机换音）；
-     * 否则三段自带音各用各的，发通知时随机挑渠道就得到随机音色。
-     */
-    static Uri pickSound(Context ctx, int variant) {
         String picked = prefs(ctx).getString(KEY_SOUND, null);
         if (isUsableSound(picked)) {
             try {
@@ -870,18 +836,14 @@ public class PushService extends Service {
         }
         // 媒体库里那份（content://，各家 ROM 都认）优先；还没写好就用 raw 资源：
         // 都是同一段水滴，只是换一种"系统能读到"的形态，**不是**换成别的音。
-        Uri media = cachedMediaSound(ctx, variant);
+        Uri media = cachedMediaSound(ctx);
         if (media != null) return media;
-        return dropSoundUri(ctx, variant);
+        return dropSoundUri(ctx);
     }
 
     /** 上次写进媒体库的 content:// URI（没有就 null）。只读 prefs，零 IO。 */
     static Uri cachedMediaSound(Context ctx) {
-        return cachedMediaSound(ctx, 0);
-    }
-
-    static Uri cachedMediaSound(Context ctx, int variant) {
-        String s = prefs(ctx).getString(mediaKeyFor(variant), null);
+        String s = prefs(ctx).getString(KEY_MEDIA_SOUND, null);
         if (!isUsableSound(s)) return null;
         try {
             return Uri.parse(s);
@@ -906,39 +868,13 @@ public class PushService extends Service {
         }
     }
 
-    /** App 自带的提示音：水滴录音里截出的三段之一（res/raw/notify_drop1..3.mp3）。 */
+    /** App 自带的提示音（res/raw/notify_drop.mp3，用户选的那一段）。 */
     static Uri dropSoundUri(Context ctx) {
-        return dropSoundUri(ctx, 0);
-    }
-
-    /** 第 variant 段自带音（0..2）；越界自动夹回，调用方不用自己判。 */
-    static Uri dropSoundUri(Context ctx, int variant) {
-        return Uri.parse("android.resource://" + ctx.getPackageName() + "/"
-                + SOUND_RAW[soundVariant(variant)]);
-    }
-
-    private static int soundVariant(int variant) {
-        int v = variant % SOUND_RAW.length;
-        return v < 0 ? v + SOUND_RAW.length : v;
-    }
-
-    /** 三段 media 缓存各自的 prefs key。 */
-    private static String mediaKeyFor(int variant) {
-        int v = soundVariant(variant);
-        if (v == 1) return KEY_MEDIA_SOUND_2;
-        if (v == 2) return KEY_MEDIA_SOUND_3;
-        return KEY_MEDIA_SOUND;
-    }
-
-    /** 媒体库里的文件名：第一段沿用老名字，升级上来的设备不会多出一条重复记录。 */
-    private static String mediaNameFor(int variant) {
-        int v = soundVariant(variant);
-        return v == 0 ? "dsh_waterdrop.mp3" : ("dsh_waterdrop_" + (v + 1) + ".mp3");
+        return Uri.parse("android.resource://" + ctx.getPackageName() + "/" + SOUND_RES);
     }
 
     /**
      * 把自带的提示音写进媒体库，拿一个各家 ROM 都认的 content:// URI（API 29+）。
-     * 三段各写一条，随机播的目标靠这三条 content:// 各绑一条渠道实现。
      *
      * 为什么必须写进媒体库：AOSP 的 setSound 文档自己就说渠道会被备份恢复，
      * 而 resource id 会随升级变化 —— 之前绑 android.resource://<pkg>/<数字 id>，
@@ -946,24 +882,19 @@ public class PushService extends Service {
      * 幂等：媒体库里已经有同名条目就直接复用，不再插一条。
      * 只允许在"一次性换代"里调用一次（启动路径上做 IO 会 ANR，见 LESSONS 6.67）。
      */
-    static void ensureMediaSound(Context ctx) {
-        for (int i = 0; i < SOUND_RAW.length; i++) ensureOneMediaSound(ctx, i);
-    }
-
-    private static Uri ensureOneMediaSound(Context ctx, int variant) {
+    static Uri ensureMediaSound(Context ctx) {
         if (Build.VERSION.SDK_INT < 29) return null;
         Cursor c = null;
-        String key = mediaKeyFor(variant);
         try {
             ContentResolver cr = ctx.getContentResolver();
             Uri collection = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI;
-            String name = mediaNameFor(variant);
+            String name = "dsh_waterdrop.mp3";
             c = cr.query(collection, new String[]{MediaStore.Audio.Media._ID},
                     MediaStore.Audio.Media.DISPLAY_NAME + "=?", new String[]{name}, null);
             if (c != null && c.moveToFirst()) {
                 Uri hit = Uri.withAppendedPath(collection, String.valueOf(c.getLong(0)));
                 // 记住它：pickSound() 只读这个缓存，不再为"挑音源"做媒体库查询
-                prefs(ctx).edit().putString(key, hit.toString()).commit();
+                prefs(ctx).edit().putString(KEY_MEDIA_SOUND, hit.toString()).commit();
                 return hit;
             }
             ContentValues v = new ContentValues();
@@ -975,7 +906,7 @@ public class PushService extends Service {
             v.put(MediaStore.Audio.Media.IS_PENDING, 1);
             Uri uri = cr.insert(collection, v);
             if (uri == null) return null;
-            InputStream in = ctx.getResources().openRawResource(SOUND_RAW[soundVariant(variant)]);
+            InputStream in = ctx.getResources().openRawResource(SOUND_RES);
             OutputStream out = cr.openOutputStream(uri);
             byte[] buf = new byte[8192];
             int n;
@@ -985,7 +916,7 @@ public class PushService extends Service {
             v.clear();
             v.put(MediaStore.Audio.Media.IS_PENDING, 0);
             cr.update(uri, v, null, null);
-            prefs(ctx).edit().putString(key, uri.toString()).commit();
+            prefs(ctx).edit().putString(KEY_MEDIA_SOUND, uri.toString()).commit();
             return uri;
         } catch (Exception e) {
             Log.w(TAG, "media sound: " + e);

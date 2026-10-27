@@ -3656,15 +3656,21 @@
     const chipWEff = level >= 1 ? CHIP_COMPACT_W : null;
     const pillWEff = level >= 2 ? PILL_COMPACT_W : pillW;
 
-    // 从右往左排：药丸在 edge 处，状态按钮依次往左叠
+    // 从右往左排：药丸在 edge 处，状态按钮依次往左叠。
+    // 右边距**直接写成内联 right**：芯片个数不设上限，靠 CSS 逐条写 --ms-sN-right
+    // 只能覆盖前 3 颗，第 4 颗会掉回 flex 原位和别的芯片叠住（2026-10-27 用户截图）。
     let acc = edge + pillWEff + gap;
     status.forEach((b, i) => {
       b.setAttribute('data-ms-sidx', String(i + 1));
-      setVar(`--ms-s${i + 1}-right`, `${acc}px`);
+      b.style.right = `${acc}px`;
+      setVar(`--ms-s${i + 1}-right`, `${acc}px`); // 保留变量：测试/诊断仍按它读
       acc += (chipWEff === null ? Math.round(b.getBoundingClientRect().width) : chipWEff) + gap;
     });
     btns.forEach((b) => {
-      if (!status.includes(b)) b.removeAttribute('data-ms-sidx');
+      if (!status.includes(b)) {
+        b.removeAttribute('data-ms-sidx');
+        b.style.removeProperty('right');
+      }
     });
     // sidx 齐了才能按它找芯片做降级（隐藏文字 span / chevron）
     applyHeaderCompact(level);

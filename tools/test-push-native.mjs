@@ -44,33 +44,30 @@ has('push 回前台刷新断连计时', push, 'static void noteForeground(Contex
 has('push 回前台撤掉断连提醒', push, 'nm.cancel(CONN_NOTIFY_ID);');
 has('main 回前台通知推送服务', main, 'PushService.noteForeground(this);');
 has('push 渠道用系统音频属性', push, 'setSound(sound, Notification.AUDIO_ATTRIBUTES_DEFAULT)');
-has('push 自带通知音兜底', push, 'return dropSoundUri(ctx, variant);');
+has('push 自带通知音兜底', push, 'return dropSoundUri(ctx);');
 has('push 震动', push, 'enableVibration(true)');
 
 has('push 选音源只扫标题不解码', push, 'static Uri pickSound(Context ctx)');
 has('push 默认提示音用自带水滴', push, 'static Uri dropSoundUri(Context ctx)');
-// 0.9.18：同一段水滴截成三段，三条渠道各绑一段，发通知时随机挑
-has('push 三段水滴都在 res/raw', push, '{R.raw.notify_drop1, R.raw.notify_drop2, R.raw.notify_drop3}');
-has('push 按 variant 取自带音', push, 'static Uri dropSoundUri(Context ctx, int variant)');
-has('push 任务完成随机挑渠道', push, 'return channelId(ctx, true, SOUND_ROLL.nextInt(SOUND_RAW.length));');
-has('push 三条渠道一起建', push, 'for (int i = 0; i < SOUND_RAW.length; i++) channelId(ctx, true, i);');
-has('push 渠道 id 带音效序号', push, 'return v == 0 ? base : base + "-" + (v + 1);');
-has('push 三条渠道都要有声音才算成功', push, 'int count = tasks ? SOUND_RAW.length : 1;');
-has('push 换代删掉上一代三条渠道', push, 'old.add("dsh-tasks-" + gen + "-" + (i + 1));');
+// 0.1.0(vc56)：用户从三段里选了第 2 段，只留一段音、一条渠道（随机播会多出三条渠道，小米上容易哑）
+has('push 自带音只有一段', push, 'private static final int SOUND_RES = R.raw.notify_drop;');
+notHas('push 不再有三分段数组', push, 'SOUND_RAW');
+notHas('push 不再随机挑渠道', push, 'SOUND_ROLL');
+has('push 任务完成走单条渠道', push, 'return channelId(ctx, "done".equals(kind));');
+has('push 换代删掉旧的三条随机音渠道', push, 'old.add("dsh-tasks-" + gen + "-2");');
 notHas('push 不再引用旧 water-drop 资源', push, 'R.raw.notify_waterdrop');
 // 0.9.3：只用系统标准接口（渠道 + setSound），不做任何兜底。
-has('push 媒体库写三段 mp3', push, 'dsh_waterdrop.mp3');
-has('push 媒体库后续段另有文件名', push, '"dsh_waterdrop_" + (v + 1) + ".mp3"');
+has('push 媒体库写一个 mp3', push, 'dsh_waterdrop.mp3');
 has('push 媒体库 MIME 用 audio/mpeg', push, 'audio/mpeg');
-has('push 媒体库音源参与挑选（只读缓存）', push, 'Uri media = cachedMediaSound(ctx, variant);');
+has('push 媒体库音源参与挑选（只读缓存）', push, 'Uri media = cachedMediaSound(ctx);');
 // 启动路径上不许有 IO 写（LESSONS 6.67）：媒体库写入只能在换代那一次做
-has('push 媒体库写入只在换代时发生', push, 'if (cachedMediaSound(this, SOUND_RAW.length - 1) == null) ensureMediaSound(this);');
+has('push 媒体库写入只在换代时发生', push, 'if (cachedMediaSound(this) == null) ensureMediaSound(this);');
 notHas('push 挑音源时不做媒体库查询', push, 'ensureMediaSound(ctx);\n        if (media != null) return media;');
-has('push 建渠道前先选音源', push, 'ensureChannel(ctx, id, name, desc, pickSound(ctx, v))');
+has('push 建渠道前先选音源', push, 'ensureChannel(ctx, id, name, desc, pickSound(ctx))');
 notHas('push 不再建完删渠道换系统铃', push, 'fallback to system tone');
 // 0.9.3 硬规矩：不兜底。pickSound 里不许再出现"退系统铃声"这条链。
 notHas('push 不再退系统铃声', push, 'firstSystemNotificationSound');
-has('push 换代用 soundV018', push, 'soundV018');
+has('push 换代用 soundV054', push, 'soundV054');
 has('push 换代成功才算生效', push, 'channelSoundOk(this, true) && channelSoundOk(this, false)');
 has('push 系统默认音名字照样读得到', push, 'Settings.System.NOTIFICATION_SOUND');
 notHas('push 不再按标题打分换音源', push, 'toneScore');

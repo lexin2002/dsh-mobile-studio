@@ -1162,6 +1162,7 @@ html[data-ms-mobile] [data-slot='conversation.input.right'] > * {
   position: fixed;
   top: var(--ms-tabrow-top);
   right: var(--ms-edge);
+  height: calc(var(--ms-tabrow-h) + 2px);
   z-index: 40;
   max-width: min(150px, 40vw);
   display: flex;
@@ -1186,19 +1187,15 @@ html[data-ms-mobile] [data-slot='conversation.input.right'] [data-ms-c~='trigger
 html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button[data-ms-sidx] {
   position: fixed;
   top: var(--ms-tabrow-top);
+  height: calc(var(--ms-tabrow-h) + 2px);
   z-index: 40;
   align-items: center;
   background: var(--dsw-alias-bg-layer-1, #fff);
   border-radius: 8px;
-}
-html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button[data-ms-sidx='1'] {
-  right: var(--ms-s1-right, calc(var(--ms-edge) + var(--ms-pill-w) + var(--ms-gap)));
-}
-html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button[data-ms-sidx='2'] {
-  right: var(--ms-s2-right, calc(var(--ms-edge) + var(--ms-pill-w) + var(--ms-gap)));
-}
-html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button[data-ms-sidx='3'] {
-  right: var(--ms-s3-right, calc(var(--ms-edge) + var(--ms-pill-w) + var(--ms-gap)));
+  /* 右边距由 mobile.js 直接写成内联 right（芯片个数不设上限：
+   * 以前只写了 --ms-s1..s3 三条规则，第 4 颗芯片没有规则 → 掉回 flex 原位、
+   * 和别的芯片叠在一起。用户 2026-10-27 截图里的错位就是这么来的）。 */
+  right: var(--ms-edge, 12px);
 }
 
 /* 2b) 装不下时的降级（由 mobile.js 的 applyHeaderCompact 控制，级别写在 html[data-ms-compact]）
@@ -1218,7 +1215,9 @@ html[data-ms-mobile][data-ms-compact='1'] header[data-ms-c~='header'] [data-ms-c
   justify-content: center;
   gap: 0;
 }
-html[data-ms-mobile][data-ms-compact='1'] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button[data-ms-sidx] svg {
+html[data-ms-mobile][data-ms-compact='1'] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button[data-ms-sidx] > *:not(svg:first-child) {
+  /* 紧凑模式只留第一个图标：文字会溢出盒子、chevon 留着也看不懂，
+   * 两个以上子元素同时显示就是用户截图里那种"◯ ⌄"错位。 */
   display: none !important;
 }
 html[data-ms-mobile][data-ms-compact='2'] [data-slot='conversation.input.right'] > * {
@@ -1255,6 +1254,13 @@ html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] bu
   overflow: hidden;
   white-space: nowrap;
   min-width: 0;
+}
+/* 芯片文字自己省略：否则会溢出盒子、压到隔壁芯片（错位的另一半原因） */
+html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button[data-ms-sidx] > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button > span {
   max-width: 6.8em;
