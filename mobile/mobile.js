@@ -59,7 +59,7 @@
 
   // 版本标记：每次改完这里同步更新。真机出问题先对这个号，
   // 免得拿着旧包的现象查新代码（之前已经吃过这个亏）。
-  window.__msVersion = '2026-10-27/r15';
+  window.__msVersion = '2026-10-27/r16';
 
   // ---- document 级点击分发 ----
   //
@@ -3610,8 +3610,9 @@
  * CSS 里不再出现任何写死的坐标，全部 var(--ms-*)。
  *
  * 量的东西：
- *   --ms-tabrow-top  标签行顶边（药丸和状态组都跟它对齐）
- *   --ms-tabrow-h    标签行高度（决定垂直居中）
+ *   --ms-tabrow-cy   标签**文字**的垂直中心（芯片/药丸都按它居中）
+ *   --ms-tabrow-top  标签文字行顶边（不是 tabs 容器顶边）
+ *   --ms-tabrow-h    标签文字行高（不是容器高度）
  *   --ms-edge        视口右边缘到标签行右边的距离（官方自己的右 padding）
  *   --ms-pill-w      用量药丸当前宽度（会随文案变长）
  *   --ms-acts-w      状态标签组当前宽度（会随任务数变长）
@@ -3632,6 +3633,26 @@
     if (root.style.getPropertyValue(k) !== v) root.style.setProperty(k, v);
   };
 
+  /**
+   * 标签行里「对话 / 轨迹」那个文字叶节点 —— 竖向对齐的**唯一真参照**。
+   *
+   * 为什么不能用 tabs 容器：实测（390 宽真实会话）容器是 50–75（h=25），
+   * 但「对话」文字贴在容器顶部 50–66，下面 9px 是下划线预留区。
+   * 把芯片/药丸锚进容器再垂直居中，实际就比左边文字低 6px ——
+   * 用户 2026-10-27 截图「文字位置和左边对不齐」正是这 6px。
+   */
+  function tabLabelEl() {
+    const vt = document.querySelector("[data-ms-c~='viewTabs']");
+    if (!vt) return null;
+    for (const el of vt.querySelectorAll('*')) {
+      if (el.children.length) continue;
+      if (!String(el.textContent || '').trim()) continue;
+      const r = el.getBoundingClientRect();
+      if (r.width > 0 && r.height > 0) return el;
+    }
+    return null;
+  }
+
   const measure = () => {
     raf = 0;
     const tabs = document.querySelector("[data-ms-c~='tabs']");
@@ -3641,6 +3662,14 @@
     const acts = document.querySelector("header [data-ms-c~='headerActions']");
     const tr = tabs.getBoundingClientRect();
     if (!tr.width) return;
+
+    // 竖向参照：优先标签文字矩形，取不到才退回容器（落地页没有 tab 行）。
+    const label = tabLabelEl();
+    const lr = label ? label.getBoundingClientRect() : null;
+    const hasLabel = !!(lr && lr.height > 0);
+    const tabTop = hasLabel ? lr.top : tr.top;
+    const tabH = hasLabel ? lr.height : tr.height;
+    const tabCy = hasLabel ? lr.top + lr.height / 2 : tr.top + 8;
 
     const edge = Math.max(0, Math.round(window.innerWidth - tr.right));
     const pillW = pill ? Math.round(pill.getBoundingClientRect().width) : 0;
@@ -3721,8 +3750,10 @@
     const avail = tabsW - reserve;
     const tight = level > 0 || (needTabs > 0 && avail < needTabs);
 
-    setVar('--ms-tabrow-top', `${Math.round(tr.top)}px`);
-    setVar('--ms-tabrow-h', `${Math.round(tr.height)}px`);
+    setVar('--ms-tabrow-top', `${Math.round(tabTop)}px`);
+    setVar('--ms-tabrow-h', `${Math.round(tabH)}px`);
+    // 芯片/药丸按这条中心线居中，才对得上左边标签文字
+    setVar('--ms-tabrow-cy', `${Math.round(tabCy)}px`);
     setVar('--ms-edge', `${edge}px`);
     setVar('--ms-pill-w', `${pillW}px`);
     setVar('--ms-tabs-reserve', `${reserveClamped}px`);

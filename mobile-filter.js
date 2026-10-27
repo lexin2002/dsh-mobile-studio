@@ -230,24 +230,246 @@ function stubFor(id) {
  * @returns 过滤后的脚本，与统计信息（dropped 里 id 解析失败的记
  *   `(unparsed@偏移)`，调用方打日志时能看到）
  */
-export function filterCombo(src) {
-  const list = segments(src);
-  if (list.length === 0) return { body: src, dropped: [] };
+/**
+ * 从 open（指向 `{`）起找配对的 `}`，跳过单双引号、模板串与注释。
+ * 找不到返回 -1。
+ */
+function matchBrace(src, open) {
+  let depth = 0;
+  let i = open;
+  const n = src.length;
+  while (i < n) {
+    const c = src[i];
+    if (c === '/' && src[i + 1] === '/') {
+      const nl = src.indexOf('\n', i + 2);
+      if (nl < 0) return -1;
+      i = nl + 1;
+      continue;
+    }
+    if (c === '/' && src[i + 1] === '*') {
+      const close = src.indexOf('*/', i + 2);
+      if (close < 0) return -1;
+      i = close + 2;
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') {
+      const q = c;
+      i += 1;
+      while (i < n) {
+        if (src[i] === '\\') { i += 2; continue; }
+        if (src[i] === q) { i += 1; break; }
+        i += 1;
+      }
+      continue;
+    }
+    if (c === '{') { depth += 1; i += 1; continue; }
+    if (c === '}') {
+      depth -= 1;
+      if (depth === 0) return i;
+      i += 1;
+      continue;
+    }
+    i += 1;
+  }
+  return -1;
+}
+
+/**
+ * 插件产物外面那层包装（`;(()=>{ …load(…)… })();`）。
+ *
+ * 为什么非要知道它：真机产物（dsh-pet 实测 208,035 字节）是
+ *   `;(()=>{ <200KB 代码> … window.__ModuleLoader__.load({...}); })();`
+ * 旧实现把「load 调用」当成段的**开头**、到 EOF 当结尾，于是连带删掉了
+ * 收尾的 `}` 和 `})();` —— 文件在函数中间断掉，整页报
+ * `SyntaxError: Unexpected end of input`（用户 2026-10-27「刷新后报错」）。
+ * 正确做法：整块 IIFE 一起换掉。
+ */
+/** IIFE 收尾：`}` 之后吞掉 `)()` 和 `;`（`})();` 完整形态）。 */
+function afterWrapperClose(src, close) {
+  let i = close + 1;
+  const skip = () => { while (i < src.length && /\s/.test(src[i])) i += 1; };
+  skip();
+  if (src[i] === ')') {
+    i += 1;
+    skip();
+    if (src[i] === '(') {
+      i += 1;
+      skip();
+      if (src[i] === ')') { i += 1; skip(); }
+    }
+  }
+  if (src[i] === ';') i += 1;
+  return i;
+}
+
+/**
+ * 单个 load 调用的结尾（裸调用形态：`window.__ModuleLoader__.load({…});`）。
+ * 形状对不上就返回 -1 —— 调用方据此**放弃切割**，宁可少删一个插件，
+ * 也绝不切出一个语法坏掉的文件。插件代码里的正则/模板串里的花括号
+ * 会让 matchBrace 判断失误，这时唯一安全的动作是不切。
+ */
+function callEnd(src, marker) {
+  const open = src.indexOf('{', marker);
+  if (open < 0) return -1;
+  const close = matchBrace(src, open);
+  if (close < 0 || close <= open) return -1;
+  let i = close + 1;
+  const skip = () => { while (i < src.length && /\s/.test(src[i])) i += 1; };
+  skip();
+  if (src[i] !== ')') return -1; // `load({…}` 后面必须是 ')'，否则说明配对错了
+  i += 1;
+  skip();
+  if (src[i] === ';') i += 1;
+  return i;
+}
+
+/**
+ * 语法自检：改过就必须仍是合法脚本，否则宁可原样放行。
+ *
+ * 为什么要有它：这一段已经两次因为"猜段边界"把手机页整体搞崩
+ * （2026-10-23 的 880 字节截断、2026-10-27 的 Unexpected end of input）。
+ * 只要产物解析不过，就不许发出去 —— 兜底方向是"放行"（页面能用、
+ * 可能多上几个插件），不是"崩页"。
+ */
+function parses(body) {
+  try {
+    // eslint-disable-next-line no-new-func
+    new Function(body);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * marker 最近的外层 IIFE（`;(()=>{ … })();`），没有就返回 null。
+ * 只在有限回看窗口内找最近的几种写法：整包扫描 + 逐个配对在 7MB 上的代价不可接受，
+ * 而包装层一定紧贴在本插件代码之前（同一插件 < 250KB）。
+ */
+const WRAP_NEEDLES = ['(()=>{', '(function(){', '(function (){', '(function('];
+
+function enclosingWrapper(src, marker) {
+  const from = Math.max(0, marker - 400000);
+  let best = -1;
+  for (const needle of WRAP_NEEDLES) {
+    const i = src.lastIndexOf(needle, marker);
+    if (i >= from && i > best) best = i;
+  }
+  if (best < 0) return null;
+  let open = src.indexOf('{', best);
+  if (open < 0 || open > marker) return null;
+  const close = matchBrace(src, open);
+  if (close <= marker) return null;
+  return { start: best, open, close };
+}
+
+/**
+ * 按给定策略切段并重组。
+ *
+ * mode='struct'：裸调用以**下一个 marker** 为界（纯结构，最稳）；
+ * mode='call'  ：只切这次 load 调用本身（花括号配对）。
+ * 被 IIFE 包着的插件两种模式都整块换（`})();` 绝不能被吃掉）。
+ */
+function build(src, marks, mode) {
+  const wraps = marks.map((m) => enclosingWrapper(src, m));
+  // 段的起点先算齐，再让相邻段互不重叠：包装层的起点可能落在上一段里，
+  // 上一段必须在它之前收住，否则同一块代码会被切两次（语法过得去、但会重复执行）。
+  const starts = marks.map((m, k) => {
+    const w = wraps[k];
+    const s = w ? w.start : m;
+    return k > 0 ? Math.max(s, marks[k - 1] + 1) : s;
+  });
+  for (let k = 1; k < starts.length; k += 1) {
+    if (starts[k] < starts[k - 1]) starts[k] = starts[k - 1];
+  }
+
+  const spans = [];
+  const unsafe = [];
+  for (let k = 0; k < marks.length; k += 1) {
+    const marker = marks[k];
+    const w = wraps[k];
+    const start = starts[k];
+    const ce = callEnd(src, marker);
+    // id 只从**这次 load 调用**里取：包装层的代码里可能有 `id: "FALLBACK"`，
+    // 无锚点的 ID_RE 会先命中它，导致桩注册错 id（dsh-pet 真机实测）。
+    const callText = src.slice(marker, ce > marker ? ce : Math.min(src.length, marker + 400));
+    const im = ID_RE.exec(callText);
+    const id = im ? (im[1] || im[2] || im[3]) : null;
+
+    let end;
+    if (w) {
+      end = afterWrapperClose(src, w.close);
+    } else if (mode === 'struct') {
+      end = k + 1 < marks.length ? starts[k + 1] : src.length;
+    } else if (ce > marker) {
+      end = ce;
+    } else {
+      unsafe.push('no-call-end@' + marker + ' ' + src.slice(marker, marker + 90).replace(/\s+/g, ' '));
+      continue;
+    }
+    // 同一包装层里的第二个 marker：并进上一段（不能再切一次）
+    if (spans.length && start <= spans[spans.length - 1].start) {
+      spans[spans.length - 1].ids.push(id);
+      continue;
+    }
+    if (end <= start) {
+      unsafe.push('end<=start@' + start + ':' + end + ' wrap=' + (w ? 'y' : 'n') + ' ' + src.slice(marker, marker + 90).replace(/\s+/g, ' '));
+      continue;
+    }
+    spans.push({ start, end, ids: [id] });
+  }
 
   const parts = [];
   const dropped = [];
-  if (list[0].start > 0) parts.push(src.slice(0, list[0].start));
-
-  for (const seg of list) {
-    const body = src.slice(seg.start, seg.end);
-    if (seg.id !== null && allow(seg.id)) {
-      parts.push(body);
-      continue;
+  let c = 0;
+  for (const s of spans) {
+    if (s.start > c) parts.push(src.slice(c, s.start));
+    const bad = s.ids.find((id) => id === null || !allow(id));
+    if (bad === undefined) {
+      parts.push(src.slice(s.start, s.end));
+    } else {
+      dropped.push(bad === null ? `(unparsed@${s.start})` : bad);
+      parts.push(stubFor(bad ?? `__ms_filtered_${dropped.length}`));
     }
-    dropped.push(seg.id === null ? `(unparsed@${seg.start})` : seg.id);
-    parts.push(stubFor(seg.id ?? `__ms_filtered_${dropped.length}`));
+    c = s.end;
   }
-  return { body: parts.join(''), dropped };
+  if (c < src.length) parts.push(src.slice(c));
+  return { body: parts.join(''), dropped, unsafe };
+}
+
+/**
+ * 剥掉组合脚本里所有不允许的插件。
+ *
+ * 真机产物有两种形态，都得支持：
+ *   A) 裸平铺：`load({...});\nload({...});`（29 个插件的大包）
+ *   B) IIFE 包装：`;(()=>{ …200KB 代码… load({...}); })();`（dsh-pet）
+ * 旧实现把 load 当"段开头"、到 EOF 当结尾，B 形态会连带删掉 `})();` 的收尾，
+ * 整个文件在函数中断掉 → `SyntaxError: Unexpected end of input`（用户 2026-10-27）。
+ *
+ * 组装后必须通过语法检查；不通过就换一种切法，仍不行则**原样放行**（fail-open）：
+ * 宁可多上几个插件，也绝不能把手机页搞崩。
+ */
+export function filterCombo(src, only) {
+  const marks = [];
+  let at = src.indexOf(LOAD_MARKER);
+  while (at >= 0) {
+    // 注释里的 marker 是文档例子，不是插件（bootstrap 包实测：注释写着
+    // `window.__ModuleLoader__.load({id, factory})`，当成真段会把 46KB 拦腰切断）。
+    if (!isInComment(src, at)) marks.push(at);
+    at = src.indexOf(LOAD_MARKER, at + LOAD_MARKER.length);
+  }
+  if (marks.length === 0) return { body: src, dropped: [] };
+
+  const modes = only ? [only] : ['struct', 'call'];
+  let last = null;
+  for (const mode of modes) {
+    const r = build(src, marks, mode);
+    last = r;
+    if (r.dropped.length === 0) return r; // 没删东西，原样返回
+    if (parses(r.body)) return r;
+  }
+  if (only) return last;
+  return { body: src, dropped: [], fallback: true, unsafe: last ? last.unsafe : [] };
 }
 
 /** 在 HTML 里定位 `globalThis["__DSH_BOOT__"] = {...}` 的对象边界（导出给校验脚本用）。 */

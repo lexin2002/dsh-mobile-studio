@@ -54,7 +54,7 @@ has('深链认官方行属性', mobile, "[data-row-key]");
 has('找不到会话只开抽屉', mobile, "reportDiag('deeplink-miss'");
 
 // ---- 版本 ----
-has('版本号已更新', mobile, "window.__msVersion = '2026-10-27/r15'");
+has('版本号已更新', mobile, "window.__msVersion = '2026-10-27/r16'");
 
 // ---- 原生桥 ----
 has('桥有 hideKeyboard', bridge, 'public void hideKeyboard()');

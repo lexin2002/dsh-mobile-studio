@@ -148,5 +148,45 @@ eq('evil-b dropped', tout.dropped, ['evil-b']);
 eq('hack gone', tout.body.includes('hack()'), false);
 eq('keep-a kept', tout.body.includes('var re'), true);
 
+// 16. 真实产物是「IIFE 包着代码、load 调用在最后」：
+//     `;(()=>{ …200KB… window.__ModuleLoader__.load({...}); })();`
+//     旧实现把 load 当段开头、到 EOF 当结尾，连带删掉收尾的 `}` 与 `})();`，
+//     整个文件在函数中间断掉 → 手机页 `SyntaxError: Unexpected end of input`
+//     （用户 2026-10-27「刷新后报错」）。现在必须整块 IIFE 一起换掉，且语法可通过。
+const wrapKeep = ';(()=>{\nconst a = 1;\nwindow.__ModuleLoader__.load({\n\tid: "keep-w",\n\tfactory: () => ({ apply() {} })\n});\n})();\n';
+const wrapEvil = ';(()=>{\nconst b = () => hack();\nwindow.__ModuleLoader__.load({\n\tid: "evil-w",\n\tfactory: makeFactory()\n});\n})();\n';
+const parses = (s) => { try { new Function(s); return true; } catch { return false; } };
+
+setAllow(['keep-w']);
+const wOnly = filterCombo(wrapKeep);
+eq('wrapped allowed untouched', wOnly.body, wrapKeep);
+eq('wrapped allowed no drops', wOnly.dropped, []);
+
+const wMix = filterCombo(wrapKeep + wrapEvil);
+eq('wrapped evil dropped', wMix.dropped, ['evil-w']);
+eq('wrapped evil code gone', wMix.body.includes('hack()'), false);
+eq('wrapped keep code intact', wMix.body.includes('const a = 1;'), true);
+eq('wrapped stub registers', wMix.body.includes('window.__ModuleLoader__.load({id:"evil-w"'), true);
+eq('wrapped closing braces not eaten', wMix.body.includes('})();'), true);
+eq('wrapped result parses', parses(wMix.body), true);
+eq('wrapped not fail-open', wMix.fallback === undefined, true);
+
+// 只含被剥插件时：整块换桩，结果同样是合法脚本
+setAllow([]);
+const wEvil = filterCombo(wrapEvil);
+eq('only-evil dropped', wEvil.dropped, ['evil-w']);
+eq('only-evil parses', parses(wEvil.body), true);
+eq('only-evil no leftover', wEvil.body.includes('hack()'), false);
+eq('only-evil only stub load', wEvil.body.split('__ModuleLoader__.load({').length - 1, 1);
+
+// 17. id 只认这次 load 调用：插件代码里可能有 `id: "FALLBACK"` 之类的字段，
+//     无锚点的 ID_RE 会先命中它，导致桩注册错 id（真机 dsh-pet 实测）。
+const wrapDecoy = ';(()=>{\nconst cfg = { id: "FALLBACK", n: 1 };\nwindow.__ModuleLoader__.load({\n\tid: "evil-x",\n\tfactory: makeFactory()\n});\n})();\n';
+setAllow([]);
+const decoy = filterCombo(wrapDecoy);
+eq('decoy id not used', decoy.dropped, ['evil-x']);
+eq('stub uses real id', decoy.body.includes('window.__ModuleLoader__.load({id:"evil-x"'), true);
+eq('decoy result parses', parses(decoy.body), true);
+
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILED`);
 process.exitCode = fail === 0 ? 0 : 1;

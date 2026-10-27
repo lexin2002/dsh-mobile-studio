@@ -1138,31 +1138,43 @@ html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='crumb'] {
  * 变量来源：mobile.js 的 msAdaptiveHeader()（在 resize / 转屏 / 视觉视口变化 /
  * DOM 变化 / 3 秒兜底时重算）：
  *   --ms-edge          视口右边缘 → 标签行右边的距离（官方自己的右 padding）
- *   --ms-tabrow-top    标签行顶边（药丸和状态组都跟它对齐）
- *   --ms-tabrow-h      标签行高度
+ *   --ms-tabrow-cy     标签**文字**的垂直中心（芯片和药丸都按它居中）
+ *   --ms-tabrow-top    标签文字行顶边
+ *   --ms-tabrow-h      标签文字行高
  *   --ms-pill-w        用量药丸当前宽度（文案变长会变）
  *   --ms-acts-w        状态标签组当前宽度（任务数变化会变）
  *   --ms-tabs-reserve  标签行右侧要给状态组+药丸空出的宽度
  *   --ms-gap           元素间距
  * 兜底值只在 JS 首帧还没跑时用。
+ *
+ * 2026-10-27 r16：竖向锚点从「tabs 容器」改成「标签文字中心的 --ms-tabrow-cy」。
+ * 实测容器 50–75 而标签文字贴在顶部 50–66（下面 9px 是下划线预留区），
+ * 锚在容器里居中就等于比左边低 6px。另外高度不再 `+2px`：官方 .trigger 自带
+ * min-height:28px，会把编出来的 27px 顶到 28、压过 header 的 1px 底线。
  */
 
 html[data-ms-mobile] {
   --ms-edge: 12px;
-  --ms-tabrow-top: 48px;
-  --ms-tabrow-h: 28px;
+  --ms-tabrow-top: 50px;
+  --ms-tabrow-h: 16px;
+  --ms-tabrow-cy: 62px;
+  /* 芯片与药丸的统一高度：装得下 12px 字 + 上下 3px 内边距（=18px 内容区） */
+  --ms-card-h: 24px;
   --ms-pill-w: 64px;
   --ms-acts-w: 0px;
   --ms-tabs-reserve: 40vw;
   --ms-gap: 8px;
 }
 
-/* 1) 用量药丸：贴右边缘、与标签行对齐；宽度由内容决定，封顶 40vw，超出省略号 */
+/* 1) 用量药丸：贴右边缘、与标签文字同一条中心线；宽度由内容决定，封顶 40vw，超出省略号 */
 html[data-ms-mobile] [data-slot='conversation.input.right'] > * {
   position: fixed;
-  top: var(--ms-tabrow-top);
+  /* 中心对齐：中心线 - 半个自身高度。两处（芯片/药丸）必须字面一致 */
+  top: calc(var(--ms-tabrow-cy) - var(--ms-card-h) / 2);
   right: var(--ms-edge);
-  height: calc(var(--ms-tabrow-h) + 2px);
+  height: var(--ms-card-h);
+  /* 官方 .trigger 有 min-height:28px，不压掉的话 24px 会被顶回去、底边越过底线 */
+  min-height: 0;
   z-index: 40;
   max-width: min(150px, 40vw);
   display: flex;
@@ -1186,8 +1198,11 @@ html[data-ms-mobile] [data-slot='conversation.input.right'] [data-ms-c~='trigger
  *    所以由 mobile.js 依次给出 --ms-s1-right / --ms-s2-right …（右边距累加）。 */
 html[data-ms-mobile] header[data-ms-c~='header'] [data-ms-c~='headerActions'] button[data-ms-sidx] {
   position: fixed;
-  top: var(--ms-tabrow-top);
-  height: calc(var(--ms-tabrow-h) + 2px);
+  /* 与药丸同一条中心线、同一个高度（表达式必须字面一致，test-tabrow-align 会核对） */
+  top: calc(var(--ms-tabrow-cy) - var(--ms-card-h) / 2);
+  height: var(--ms-card-h);
+  /* 官方 .trigger 的 min-height:28px 必须压掉，否则底边压过 header 的 1px 底线 */
+  min-height: 0;
   z-index: 40;
   align-items: center;
   background: var(--dsw-alias-bg-layer-1, #fff);
