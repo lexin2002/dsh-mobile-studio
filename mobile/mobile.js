@@ -59,7 +59,7 @@
 
   // 版本标记：每次改完这里同步更新。真机出问题先对这个号，
   // 免得拿着旧包的现象查新代码（之前已经吃过这个亏）。
-  window.__msVersion = '2026-10-27/r14';
+  window.__msVersion = '2026-10-27/r15';
 
   // ---- document 级点击分发 ----
   //
@@ -2640,6 +2640,7 @@
     // 每次按键先清上一发的命中记录，排查时只看这一次。
     try {
       window.__msBackHit = '';
+      window.__msBackSkip = '';
     } catch {
       /* noop */
     }
@@ -2672,7 +2673,8 @@
       try {
         reportDiag('back', {
           layer: n,
-          hit: String(window.__msBackHit || '').slice(0, 50),
+          hit: String(window.__msBackHit || '').slice(0, 90),
+          sk: String(window.__msBackSkip || '').slice(0, 80),
           ifr: [...document.querySelectorAll('iframe')].filter((el) => inView(el)).length,
           act: (document.activeElement && document.activeElement.tagName) || '',
         });
@@ -2744,15 +2746,43 @@
           .trim();
       const isBackName = (s) => /^[‹<←\s]*(返回|后退|back\b|go back)/i.test(s);
       const isCloseName = (s) => /^(关闭|close|关闭详情|关闭面板)$/i.test(s);
+      // 点不了的按钮不能认：disabled 的 button .click() 是静默无操作的，
+      // 还吞掉这次按键 —— 用户 2026-10-27 右栏网页：连按 10 次全是 layer=5，
+      // 点的都是同一个"后退"，焦点一次没动过（disabled 按钮本来也聚不上焦）。
+      // 跳过的记进 __msBackSkip，随 back 诊断上报；取证完这段即删。
+      // 同一个按钮一按只记一次（5/5b 会各过一遍 clickable，Set 去重）。
+      const skipSeen = new Set();
+      const clickable = (el) => {
+        try {
+          const nm = controlName(el).slice(0, 20);
+          const bad = el.disabled
+            ? 'dis:' + nm
+            : (el.getAttribute('aria-disabled') || '').toLowerCase() === 'true'
+              ? 'aria:' + nm
+              : '';
+          if (bad) {
+            if (!skipSeen.has(el)) {
+              skipSeen.add(el);
+              window.__msBackSkip += (window.__msBackSkip ? ',' : '') + bad;
+            }
+            return false;
+          }
+        } catch {
+          /* 读不到就当能点 */
+        }
+        return true;
+      };
       const topControls = [...document.querySelectorAll('button, [role="button"]')].filter((el) => {
         if (!inView(el)) return false;
         return el.getBoundingClientRect().top < 220;
       });
-      const backBtn = topControls.find((el) => isBackName(controlName(el)));
+      const clickables = topControls.filter(clickable);
+      const backBtn = clickables.find((el) => isBackName(controlName(el)));
       if (backBtn) {
         backBtn.click();
         try {
-          window.__msBackHit = 'back:' + controlName(backBtn).slice(0, 40);
+          window.__msBackHit =
+            'back:' + controlName(backBtn).slice(0, 30) + '@' + pathOf(backBtn).slice(0, 60);
         } catch {
           /* noop */
         }
@@ -2761,14 +2791,15 @@
 
       // 5a. 详情页的关闭 X（自动化任务详情）：名字是「关闭」，不是「返回」。
       //     只在 detail 容器里认，避免把别处的「关闭」当成"返回上一级"。
-      const closeBtn = topControls.find((el) => {
+      const closeBtn = clickables.find((el) => {
         if (!isCloseName(controlName(el))) return false;
         return !!el.closest('[class*="detail"], [class*="Detail"]');
       });
       if (closeBtn) {
         closeBtn.click();
         try {
-          window.__msBackHit = 'close:' + controlName(closeBtn).slice(0, 40);
+          window.__msBackHit =
+            'close:' + controlName(closeBtn).slice(0, 30) + '@' + pathOf(closeBtn).slice(0, 60);
         } catch {
           /* noop */
         }
@@ -2783,11 +2814,16 @@
       //    收起键真名是「收起右侧边栏」（右上角 @356,10），只认这个精确名字，
       //    不放宽（第 5 层吃过正则太松的亏），而且必须真在屏内（关着时它停在
       //    x=746 屏外，visible() 会误判）。会话本来就在底下，关掉即回。
-      const rbClose = [...document.querySelectorAll('button[aria-label="收起右侧边栏"]')].find((el) =>
-        inView(el),
+      const rbClose = [...document.querySelectorAll('button[aria-label="收起右侧边栏"]')].find(
+        (el) => inView(el) && clickable(el),
       );
       if (rbClose) {
         rbClose.click();
+        try {
+          window.__msBackHit = 'rbclose@' + pathOf(rbClose).slice(0, 60);
+        } catch {
+          /* noop */
+        }
         return hit(5);
       }
 
@@ -2815,7 +2851,7 @@
         }
         if (moved) {
           try {
-            window.__msBackHit = 'webframe-back';
+            window.__msBackHit = 'webframe-back@' + pathOf(webFrame).slice(0, 60);
           } catch {
             /* noop */
           }

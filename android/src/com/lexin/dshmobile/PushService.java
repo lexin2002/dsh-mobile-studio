@@ -5,10 +5,12 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.ContentResolver;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.content.pm.ServiceInfo;
@@ -105,6 +107,12 @@ public class PushService extends Service {
     private volatile boolean running = false;
     private Thread worker;
     private Thread watchdog;
+    /** 当前 SSE 连接：亮屏/网络恢复时从外面掐断它，read() 立刻抛错重连，不用等 45 秒超时。 */
+    private volatile HttpURLConnection curConn = null;
+    /** 被亮屏/网络恢复踢过：下一次循环跳过退避睡眠，直接重连。 */
+    private volatile boolean wakeKick = false;
+    private BroadcastReceiver wakeReceiver = null;
+    private ConnectivityManager.NetworkCallback netCallback = null;
     private String base;
     /** 最近一次读到字节的时刻；断连兜底看它。 */
     private volatile long lastByteAt = 0;
@@ -247,8 +255,85 @@ public class PushService extends Service {
             worker.start();
             startWatchdog();
         }
+        // 亮屏/网络恢复立刻重连（用户 2026-10-27「去看通知栏才弹消息」）：
+        // 熄屏期间连接 frozen，重连靠 45 秒读超时 + 最长 60 秒退避，
+        // 用户下拉那一下正好点亮屏幕，重连补发看起来就像"一看才弹"。
+        registerWakeTriggers();
         // 被系统杀掉后尽量自动回来（强行停止除外，那谁也救不了）
         return START_STICKY;
+    }
+
+    /**
+     * 亮屏 / 网络恢复 → 踢一脚 SSE，让它现在就重连。
+     * 只用动态注册（SCREEN_ON 本来就只能动态收；NetworkCallback 不需要任何新权限，
+     * ACCESS_NETWORK_STATE 已有）。踢法两步：掐断当前连接（read() 立刻抛错）+
+     * 打断退避睡眠（loop 里被打断后 continue，不退出）。
+     */
+    private void registerWakeTriggers() {
+        if (wakeReceiver == null) {
+            wakeReceiver = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context c, Intent i) {
+                    kickReconnect("screen-on");
+                }
+            };
+            try {
+                registerReceiver(wakeReceiver, new IntentFilter(Intent.ACTION_SCREEN_ON));
+            } catch (Exception e) {
+                Log.w(TAG, "screen receiver: " + e);
+                wakeReceiver = null;
+            }
+        }
+        if (netCallback == null) {
+            try {
+                ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+                if (cm == null) return;
+                netCallback = new ConnectivityManager.NetworkCallback() {
+                    @Override
+                    public void onAvailable(Network n) {
+                        kickReconnect("net-available");
+                    }
+                };
+                cm.registerDefaultNetworkCallback(netCallback);
+            } catch (Exception e) {
+                Log.w(TAG, "net callback: " + e);
+                netCallback = null;
+            }
+        }
+    }
+
+    private void kickReconnect(String why) {
+        if (!running) return;
+        wakeKick = true;
+        try {
+            HttpURLConnection c = curConn;
+            if (c != null) c.disconnect();
+        } catch (Exception e) {
+            /* 掐不断就等读超时，至多多等 45 秒 */
+        }
+        try {
+            Thread t = worker;
+            if (t != null) t.interrupt();
+        } catch (Exception e) {
+            /* workers 没起就不用叫醒 */
+        }
+        Log.w(TAG, "wake kick: " + why);
+    }
+
+    private void unregisterWakeTriggers() {
+        try {
+            if (wakeReceiver != null) unregisterReceiver(wakeReceiver);
+        } catch (Exception e) {
+            /* 进程都要没了 */
+        }
+        wakeReceiver = null;
+        try {
+            ConnectivityManager cm = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (cm != null && netCallback != null) cm.unregisterNetworkCallback(netCallback);
+        } catch (Exception e) {
+            /* 关不掉就算 */
+        }
+        netCallback = null;
     }
 
     @Override
@@ -263,6 +348,7 @@ public class PushService extends Service {
         Thread w = watchdog;
         watchdog = null;
         if (w != null) w.interrupt();
+        unregisterWakeTriggers();
         cancelConnectionNotice();
         super.onDestroy();
     }
@@ -289,6 +375,7 @@ public class PushService extends Service {
                 c.setRequestProperty("Accept", "text/event-stream");
                 String cookie = cookieFor(pushUrl);
                 if (cookie != null && !cookie.isEmpty()) c.setRequestProperty("Cookie", cookie);
+                curConn = c;
                 int code = c.getResponseCode();
                 if (code != 200) throw new IllegalStateException("http " + code);
                 // 连上就复位退避：下一次断线从 1 秒开始重试
@@ -312,12 +399,27 @@ public class PushService extends Service {
                 Log.w(TAG, "sse: " + e);
             } finally {
                 if (c != null) c.disconnect();
+                if (curConn == c) curConn = null;
             }
             if (!running) return;
+            // 被亮屏/网络恢复踢过：跳过退避睡眠，现在就重连。
+            // 之前这里无条件睡 backoff（最长 60 秒），加上 45 秒读超时，
+            // 熄屏后醒来最慢 105 秒才补到消息 —— 用户看到的就是"一看通知栏才弹"。
+            if (wakeKick) {
+                wakeKick = false;
+                backoff = 1000;
+                continue;
+            }
             try {
                 Thread.sleep(backoff);
             } catch (InterruptedException e) {
-                return;
+                // 只有进程要没了才退出；kickReconnect 的打断走上面 wakeKick 分支立刻重连。
+                if (!running) return;
+                if (wakeKick) {
+                    wakeKick = false;
+                    backoff = 1000;
+                }
+                continue;
             }
             backoff = Math.min(backoff * 2, 60000);
         }
@@ -383,7 +485,8 @@ public class PushService extends Service {
                     try {
                         Thread.sleep(30000);
                     } catch (InterruptedException e) {
-                        return;
+                        if (!running) return;
+                        continue;
                     }
                     try {
                         if (!everConnected || connAlerted) continue;
@@ -623,6 +726,7 @@ public class PushService extends Service {
         }
     }
 
+    @SuppressWarnings("deprecation")
     private void notifyEvent(String id, String kind, String sessionId, String title, String detail) {
         try {
             // App 在前台就不打扰：用户正看着，不需要系统通知
@@ -645,14 +749,20 @@ public class PushService extends Service {
             Notification n = new Notification.Builder(this, channelFor(this, kind))
                     .setContentTitle(titleFor(kind))
                     .setContentText(text)
+                    .setTicker(text)
                     .setStyle(new Notification.BigTextStyle().bigText(text))
                     .setSmallIcon(R.mipmap.ic_launcher)
                     .setContentIntent(pi)
                     .setAutoCancel(true)
                     .setWhen(System.currentTimeMillis())
                     .setShowWhen(true)
-                    .setCategory("done".equals(kind)
-                            ? Notification.CATEGORY_STATUS : Notification.CATEGORY_REMINDER)
+                    // 全走 REMINDER：以前 done 用 CATEGORY_STATUS（常驻状态），
+                    // 部分 ROM 对它不探头、不响 —— 消息就只躺在栏里等用户下拉才发现。
+                    // PRIORITY_HIGH / VISIBILITY_PUBLIC 在 8.0+ 已废弃但无害：
+                    // 8.0 以下靠它探头，部分国产 ROM 照样读它。
+                    .setPriority(Notification.PRIORITY_HIGH)
+                    .setVisibility(Notification.VISIBILITY_PUBLIC)
+                    .setCategory(Notification.CATEGORY_REMINDER)
                     .build();
             nm.notify(notificationId(id), n);
             sLastNotifyAt = System.currentTimeMillis();
@@ -676,12 +786,15 @@ public class PushService extends Service {
             Notification n = new Notification.Builder(this, chId)
                     .setContentTitle("DSH 连接中断")
                     .setContentText(text)
+                    .setTicker(text)
                     .setStyle(new Notification.BigTextStyle().bigText(text))
                     .setSmallIcon(R.mipmap.ic_launcher)
                     .setContentIntent(pi)
                     .setAutoCancel(true)
                     .setWhen(System.currentTimeMillis())
                     .setShowWhen(true)
+                    .setPriority(Notification.PRIORITY_HIGH)
+                    .setVisibility(Notification.VISIBILITY_PUBLIC)
                     .setCategory(Notification.CATEGORY_REMINDER)
                     .build();
             nm.notify(CONN_NOTIFY_ID, n);
@@ -966,6 +1079,7 @@ public class PushService extends Service {
     }
 
     /** 自检里的「发一条测试通知」：立刻验证声音、横幅和渠道设置。 */
+    @SuppressWarnings("deprecation")
     static void postTest(Context ctx) {
         try {
             if (!canPost(ctx)) return;
@@ -980,12 +1094,15 @@ public class PushService extends Service {
             Notification n = new Notification.Builder(ctx, chId)
                     .setContentTitle("DSH 测试通知")
                     .setContentText("听到声音、看到横幅就说明渠道正常；没声音就看系统通知设置里的渠道")
+                    .setTicker("DSH 测试通知")
                     .setStyle(new Notification.BigTextStyle().bigText(
                             "听到声音、看到横幅就说明渠道正常。没声音请到「通知设置 → 需要你处理」把声音打开。"))
                     .setSmallIcon(R.mipmap.ic_launcher)
                     .setContentIntent(pi)
                     .setAutoCancel(true)
                     .setWhen(System.currentTimeMillis())
+                    .setPriority(Notification.PRIORITY_HIGH)
+                    .setVisibility(Notification.VISIBILITY_PUBLIC)
                     .setCategory(Notification.CATEGORY_REMINDER)
                     .build();
             nm.notify(TEST_ID, n);
@@ -1086,6 +1203,10 @@ public class PushService extends Service {
         sb.append("渠道音源：").append(currentSoundSource(ctx)).append('\n');
         sb.append("渠道 任务完成：").append(channelState(ctx, taskCh)).append('\n');
         sb.append("渠道 需要你处理：").append(channelState(ctx, attCh)).append('\n');
+        // 用户 2026-10-27「去看通知栏才弹消息」：两种可能各占一半 ——
+        // 熄屏断连醒来才补（已加亮屏/网络恢复踢醒），或通知只躺栏里不探头
+        // （小米默认关悬浮）。这行把第二种的自查入口钉在这里。
+        sb.append("只躺栏里不探头：点「打开本渠道设置」把悬浮/横幅、锁屏显示、声音全打开\n");
         try {
             PowerManager pm = (PowerManager) ctx.getSystemService(Context.POWER_SERVICE);
             boolean ok = pm != null && pm.isIgnoringBatteryOptimizations(ctx.getPackageName());
@@ -1229,6 +1350,7 @@ public class PushService extends Service {
     }
 
     /** 前台服务没起来 = 后台推送必然丢，必须让用户看见，不能只写日志。 */
+    @SuppressWarnings("deprecation")
     private void notifyForegroundFailed() {
         try {
             if (!canPost(this)) return;

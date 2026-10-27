@@ -148,7 +148,7 @@ has('10 秒续一次心跳', mobile, 'setInterval(pageReadyPing, 10000)');
 has('捕获全局异常', mobile, "window.addEventListener('error'");
 has('捕获未处理的 Promise', mobile, "window.addEventListener('unhandledrejection'");
 has('上报节流 1s', mobile, 'now - lastErrAt < 1000');
-has('页面版本 r14', mobile, "window.__msVersion = '2026-10-27/r14'");
+has('页面版本 r15', mobile, "window.__msVersion = '2026-10-27/r15'");
 
 // ---------------- 8. 本地页：一个表单走完连接（地址 + 可选密码） ----------------
 has('本地页有密码框', shell, 'id="pw"');

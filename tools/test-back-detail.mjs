@@ -50,7 +50,7 @@ check('关闭分支在返回分支之后、第 6 层之前', back.indexOf('const
 check('关闭分支只认精确「关闭/Close」', !/isCloseName[\s\S]{0,80}收起右侧边栏/.test(back));
 
 // ---- 打点与层级顺序 ----
-check('命中记录 __msBackHit（back/close）', /__msBackHit = 'back:/.test(back) && /__msBackHit = 'close:/.test(back));
+check('命中记录 __msBackHit（back/close）', /__msBackHit =\s*'back:/.test(back) && /__msBackHit =\s*'close:/.test(back));
 check('每次按键先清 __msBackHit', /window\.__msBackHit = ''/.test(back));
 check(
   '第 6 层仍在页内返回之后',
@@ -58,6 +58,16 @@ check(
 );
 check('右栏收起仍只认「收起右侧边栏」', /button\[aria-label="收起右侧边栏"\]/.test(back));
 check('面板首页仍走第 6 层回会话', /if \(!document\.querySelector\('\[class\*="_card"\]'\) \|\| foreignOverlay\(\)\)/.test(back));
+
+// ---- 点不了的不认（2026-10-27 右栏网页：disabled 的"后退"被连点 10 次，毫无反应） ----
+check('有 clickable 守卫', /const clickable = \(el\) =>/.test(back));
+check('disabled 按钮跳过', /el\.disabled\s*\?\s*'dis:'/.test(back));
+check('aria-disabled=true 按钮跳过', /aria-disabled/.test(back));
+check('跳过的记进 __msBackSkip', /window\.__msBackSkip \+=/.test(back));
+check('返回/关闭只在可点的里找', /clickables\.find/.test(back) && /const clickables = topControls\.filter\(clickable\)/.test(back));
+check('收起键也要过 clickable', /inView\(el\) && clickable\(el\)/.test(back));
+check('back 诊断带 skip 字段', /sk: String\(window\.__msBackSkip/.test(back));
+check('点击记录带按钮路径', /pathOf\(backBtn\)/.test(back) && /pathOf\(rbClose\)/.test(back));
 
 if (fail) {
   console.log(`\n${fail} 项失败`);

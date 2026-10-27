@@ -2034,6 +2034,7 @@ public class MainActivity extends Activity {
         }
     }
 
+    @SuppressWarnings("deprecation")
     void notifyTaskDone(String sessionId, String title, long finishedAt, String kind) {
         try {
             if (!canPostNotifications()) return;
@@ -2059,14 +2060,19 @@ public class MainActivity extends Activity {
             Notification n = new Notification.Builder(this, chId)
                     .setContentTitle(PushService.titleFor(k))
                     .setContentText(text)
+                    .setTicker(text)
                     .setStyle(new Notification.BigTextStyle().bigText(text))
                     .setSmallIcon(R.mipmap.ic_launcher)
                     .setContentIntent(pi)
                     .setAutoCancel(true)
                     .setWhen(System.currentTimeMillis())
                     .setShowWhen(true)
-                    .setCategory("done".equals(k)
-                            ? Notification.CATEGORY_STATUS : Notification.CATEGORY_REMINDER)
+                    // 和 PushService 主路一致：全走 REMINDER + 高优先级 + 锁屏可见。
+                    // done 曾用 CATEGORY_STATUS，部分 ROM 对它不探头（用户 2026-10-27
+                    // 「去看通知栏才弹消息」的一半原因）。
+                    .setPriority(Notification.PRIORITY_HIGH)
+                    .setVisibility(Notification.VISIBILITY_PUBLIC)
+                    .setCategory(Notification.CATEGORY_REMINDER)
                     .build();
             nm.notify(PushService.notificationId(id), n);
         } catch (Exception e) {

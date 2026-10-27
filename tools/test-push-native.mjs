@@ -167,5 +167,23 @@ has('网关：诊断只记元数据不记内容', lan, 'diagRec({');
 has('网关：标题不发 null', lan, "title: title == null ? '' : String(title),");
 has('push：标题 null 归一为空串', push, '"null".equals(title)');
 
+// 0.1.0(vc57)：用户「去看通知栏才弹消息」——两半原因一起修。
+// 一半是熄屏断连醒来才补（45s 读超时 + 最长 60s 退避）：亮屏/网络恢复踢一脚立刻重连。
+has('push 亮屏踢醒重连', push, 'Intent.ACTION_SCREEN_ON');
+has('push 网络恢复踢醒重连', push, 'registerDefaultNetworkCallback');
+has('push 踢醒掐断当前连接', push, 'curConn');
+has('push 踢醒跳过退避', push, 'wakeKick');
+has('push 打断退避后继续循环', push, 'kickReconnect 的打断');
+has('push 退出时注销踢醒器', push, 'unregisterWakeTriggers();');
+// 另一半是通知只躺栏里不探头：done 曾用 CATEGORY_STATUS + 缺优先级/锁屏可见/Ticker。
+notHas('push 不再用 STATUS 压住完成通知', push, '? Notification.CATEGORY_STATUS');
+has('push 通知高优先级', push, 'setPriority(Notification.PRIORITY_HIGH)');
+has('push 通知锁屏可见', push, 'setVisibility(Notification.VISIBILITY_PUBLIC)');
+has('push 通知带 Ticker', push, '.setTicker(');
+has('main 轮询通知高优先级', main, 'setPriority(Notification.PRIORITY_HIGH)');
+has('main 轮询通知锁屏可见', main, 'setVisibility(Notification.VISIBILITY_PUBLIC)');
+notHas('main 不再用 STATUS 压住完成通知', main, '? Notification.CATEGORY_STATUS');
+has('push 自检提示悬浮开关', push, '只躺栏里不探头');
+
 console.log(fail === 0 ? '\nALL PASS' : `\n${fail} FAILED`);
 process.exitCode = fail === 0 ? 0 : 1;
